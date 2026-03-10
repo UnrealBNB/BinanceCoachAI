@@ -3,7 +3,11 @@ name: binance-coach
 description: AI-powered crypto trading behavior coach for Binance users. Analyzes live portfolio health, detects emotional trading patterns (FOMO, panic selling, overtrading), provides smart DCA recommendations based on RSI + Fear & Greed index, and delivers personalized AI coaching via Claude. Use when a user asks to: analyze their crypto portfolio, get DCA advice, check market conditions (RSI, Fear & Greed, SMA200), review trading behavior/FOMO/panic sells, get AI coaching on their holdings, set price/RSI alerts, learn about crypto concepts (RSI, DCA, SMA200), start a Telegram trading coach bot, or ask anything about their Binance portfolio.
 license: MIT
 homepage: https://github.com/UnrealBNB/BinanceCoachAI
-metadata: {"openclaw":{"emoji":"📊","homepage":"https://github.com/UnrealBNB/BinanceCoachAI","requires":{"bins":["python3","pip3"],"env":["BINANCE_API_KEY","BINANCE_API_SECRET"]},"primaryEnv":"BINANCE_API_KEY","install":[{"id":"setup","kind":"download","url":"https://github.com/UnrealBNB/BinanceCoachAI/archive/refs/heads/main.zip","label":"Download BinanceCoach source (then run scripts/setup.sh)"}]}}
+metadata:
+  {
+    "openclaw":
+      { "emoji": "📊", "requires": { "bins": ["python3", "pip3"], "env": ["BINANCE_API_KEY", "BINANCE_API_SECRET"] }, "primaryEnv": "BINANCE_API_KEY", "install": [{ "id": "python3", "kind": "brew", "formula": "python3", "bins": ["python3", "pip3"] }] },
+  }
 ---
 
 # 📊 BinanceCoach

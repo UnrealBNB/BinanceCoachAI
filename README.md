@@ -39,9 +39,15 @@ OpenClaw will run the setup script automatically, which:
 4. **Writes everything to `.env`** — no manual file editing
 5. **Verifies** Binance connectivity
 
-> 💡 **No Anthropic API key needed when using OpenClaw.**  
-> OpenClaw is already powered by Claude. BinanceCoach fetches your live Binance data, and OpenClaw does the AI analysis natively — no extra API key or cost required.  
-> An Anthropic key is only needed if you run the **standalone Telegram bot** directly (without OpenClaw).
+> 💡 **Only one thing is required when using OpenClaw: your Binance API key.**
+>
+> | | OpenClaw skill | Standalone bot |
+> |---|---|---|
+> | Binance API key | ✅ Required | ✅ Required |
+> | Anthropic API key | ❌ Not needed | ✅ Required |
+> | Telegram bot token | ❌ Not needed | ✅ Required |
+>
+> **Why?** OpenClaw already has Claude built in and already handles Telegram. BinanceCoach just provides the Binance data layer — OpenClaw does the rest natively. No extra accounts, no extra API costs.
 
 #### Use it
 

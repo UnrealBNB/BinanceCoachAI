@@ -96,16 +96,23 @@ fi
 
 # ── Telegram (optional) ───────────────────────────────────────────────────────
 echo ""
-echo "3️⃣  Telegram Bot (optional — skip with Enter)"
-echo "   → Telegram: message @BotFather → /newbot → copy token"
-echo "   → Your Telegram user ID: message @userinfobot"
+echo "3️⃣  Telegram Bot"
+echo "   ℹ️  If you're using BinanceCoach via OpenClaw, skip this too."
+echo "      OpenClaw already handles Telegram — no separate bot needed."
+echo "      Only needed if you want a dedicated @BinanceCoachAIBot"
+echo "      running independently of OpenClaw."
 echo ""
-read -rp "  Set up Telegram bot? [y/N]: " setup_tg
+read -rp "  Set up standalone Telegram bot? [y/N]: " setup_tg
 if [[ "${setup_tg,,}" == "y" ]]; then
+    echo "   → Telegram: message @BotFather → /newbot → copy token"
+    echo "   → Your Telegram user ID: message @userinfobot"
+    echo ""
     TG_TOKEN="$(prompt_key "TELEGRAM_BOT_TOKEN" "Bot Token")"
     TG_UID="$(prompt_key "TELEGRAM_USER_ID" "Your Telegram User ID")"
     set_env "TELEGRAM_BOT_TOKEN" "$TG_TOKEN"
     set_env "TELEGRAM_USER_ID" "$TG_UID"
+else
+    echo "   ⏭️  Skipped — OpenClaw handles Telegram natively."
 fi
 
 # ── Language ──────────────────────────────────────────────────────────────────

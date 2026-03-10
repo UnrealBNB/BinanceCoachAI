@@ -9,11 +9,17 @@ AI-powered crypto trading behavior coach. Connects to the user's Binance account
 
 ## How AI coaching works in OpenClaw mode
 
-When used as an OpenClaw skill, **no Anthropic API key is needed**. OpenClaw is already Claude — it reads the data output from BinanceCoach (portfolio, market, behavior) and does the analysis natively.
+When used as an OpenClaw skill, **only a Binance API key is required**:
 
-The `bc.sh coach`, `bc.sh weekly`, and `bc.sh ask` commands exist for standalone use. In OpenClaw mode, just ask naturally — the data commands are all you need.
+| | OpenClaw skill | Standalone bot |
+|---|---|---|
+| Binance API key | ✅ Required | ✅ Required |
+| Anthropic API key | ❌ Not needed | ✅ Required |
+| Telegram bot token | ❌ Not needed | ✅ Required |
 
-An Anthropic API key is only required if running the **standalone Telegram bot** (`bc.sh telegram`) or CLI (`python main.py`) directly, without OpenClaw.
+OpenClaw is already Claude and already handles Telegram. BinanceCoach provides the Binance data layer — OpenClaw does the AI analysis and messaging natively.
+
+The `bc.sh coach`, `bc.sh weekly`, `bc.sh ask`, and `bc.sh telegram` commands exist for standalone use only. In OpenClaw mode, just ask naturally — the data commands are all you need.
 
 ## Setup (run this first)
 

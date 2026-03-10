@@ -27,8 +27,8 @@ After installation, tell your OpenClaw assistant to set it up:
 > *"Set up BinanceCoach"*
 
 OpenClaw will run the setup script automatically, which:
-1. **Clones** `UnrealBNB/BinanceCoachAI` from GitHub
-2. **Installs** all Python dependencies
+1. **Copies bundled source** to `~/workspace/binance-coach/` — no internet required, all code ships inside the skill
+2. **Installs** Python dependencies via pip
 3. **Asks you interactively** for your API keys:
    - Binance API key + secret (read-only) ← **required**
    - Anthropic API key ← **not needed in OpenClaw mode** (see below)
@@ -331,6 +331,25 @@ All messages use Telegram HTML formatting — no Markdown rendering issues.
 | Trade history | Stored locally in SQLite (`data/`) — never leaves your machine |
 | Telegram bot | Single-user restriction via `TELEGRAM_USER_ID` — others get ⛔ |
 | `.env` | Excluded from git via `.gitignore` |
+
+### ⚠️ About the ClaWHub Security Scanner
+
+When installing via ClaWHub, you may see a **"Suspicious"** warning. This is expected and explained below — it does **not** mean the skill is malicious.
+
+The scanner flags two patterns that are accurate but inherent to what this tool does:
+
+**1. "Registry metadata claims no required env vars"**
+ClaWHub's registry API doesn't store declared env vars for any skill — it's a platform limitation. The scanner compares the registry (which always says "none") against the SKILL.md (which correctly declares `BINANCE_API_KEY` as required) and flags the mismatch. This cannot be fixed without ClaWHub updating their infrastructure.
+
+**2. "Portfolio data sent to Anthropic"**
+If you configure `ANTHROPIC_API_KEY` (optional, standalone mode only), the `/coach`, `/weekly`, and `/ask` commands will send your portfolio data to Anthropic's API for AI analysis. This is documented, intentional, and only happens if you explicitly provide that key.
+
+**In OpenClaw mode, no data is sent to Anthropic** — OpenClaw already has Claude built in and analyzes locally.
+
+**What to verify before installing:**
+- Create a Binance API key with **Read Only** permissions only
+- Skip `ANTHROPIC_API_KEY` unless you're running the standalone bot
+- Audit the bundled source: everything is in `openclaw-skill/binance-coach/src/`
 
 ---
 

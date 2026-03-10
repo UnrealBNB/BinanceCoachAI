@@ -2,6 +2,39 @@
 name: binance-coach
 description: AI-powered crypto trading behavior coach for Binance users. Analyzes live portfolio health, detects emotional trading patterns (FOMO, panic selling, overtrading), provides smart DCA recommendations based on RSI + Fear & Greed index, and delivers personalized AI coaching via Claude. Use when a user asks to: analyze their crypto portfolio, get DCA advice, check market conditions (RSI, Fear & Greed, SMA200), review trading behavior/FOMO/panic sells, get AI coaching on their holdings, set price/RSI alerts, learn about crypto concepts (RSI, DCA, SMA200), start a Telegram trading coach bot, or ask anything about their Binance portfolio.
 license: MIT
+env_vars:
+  - name: BINANCE_API_KEY
+    description: "Binance read-only API key"
+    required: true
+    sensitive: true
+  - name: BINANCE_API_SECRET
+    description: "Binance read-only API secret for HMAC signing"
+    required: true
+    sensitive: true
+  - name: ANTHROPIC_API_KEY
+    description: "Claude API key — standalone mode only, not needed with OpenClaw"
+    required: false
+    sensitive: true
+  - name: TELEGRAM_BOT_TOKEN
+    description: "Telegram bot token from @BotFather — standalone bot only"
+    required: false
+    sensitive: true
+  - name: TELEGRAM_USER_ID
+    description: "Your Telegram user ID — restricts bot to one authorized user"
+    required: false
+    sensitive: false
+  - name: LANGUAGE
+    description: "en or nl. Default: en"
+    required: false
+    sensitive: false
+  - name: RISK_PROFILE
+    description: "conservative, moderate, or aggressive. Default: moderate"
+    required: false
+    sensitive: false
+  - name: DCA_BUDGET_MONTHLY
+    description: "Monthly DCA budget in USD. Default: 500"
+    required: false
+    sensitive: false
 metadata:
   {
     "openclaw": {
@@ -9,12 +42,7 @@ metadata:
       "homepage": "https://github.com/UnrealBNB/BinanceCoachAI",
       "requires": { "bins": ["python3", "pip3"] },
       "setup": "scripts/setup.sh",
-      "source": {
-        "type": "github",
-        "repo": "https://github.com/UnrealBNB/BinanceCoachAI",
-        "branch": "main",
-        "install_path": "~/workspace/binance-coach"
-      },
+      "bundled": true,
       "security": {
         "api_access": "read-only",
         "no_trading": true,

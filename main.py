@@ -389,11 +389,231 @@ def run_telegram():
     app.run_polling()
 
 
+def run_command(cmd_str: str):
+    """
+    Non-interactive single-command mode for OpenClaw skill / scripting.
+    No banner, no prompt — just output the result and exit.
+    Used by: openclaw-skill/binance-coach/scripts/bc.sh
+    """
+    from modules.market import MarketData
+    from modules.portfolio import Portfolio
+    from modules.dca import DCAAdvisor
+    from modules.alerts import AlertManager
+    from modules.behavior import BehaviorCoach
+    from modules.education import EducationModule
+
+    client = init_clients()
+    market = MarketData(client)
+    portfolio = Portfolio(client, market)
+    dca = DCAAdvisor(
+        market,
+        monthly_budget=float(os.getenv("DCA_BUDGET_MONTHLY", 500)),
+        risk_profile=os.getenv("RISK_PROFILE", "moderate")
+    )
+    alert_mgr = AlertManager(market)
+    behavior = BehaviorCoach(client, market)
+    edu = EducationModule()
+
+    try:
+        ai = None
+        from modules.ai_coach import AICoach
+        ai = AICoach()
+    except Exception:
+        pass
+
+    # Reuse the same dispatch logic as the interactive CLI
+    _dispatch_command(
+        cmd_str.strip(), client, market, portfolio, dca,
+        alert_mgr, behavior, edu, ai, console
+    )
+
+
+def _dispatch_command(cmd_str, client, market, portfolio, dca, alert_mgr, behavior, edu, ai, console):
+    """
+    Shared command dispatcher — used by both run_cli() and run_command().
+    Returns True to continue loop, False to exit (for 'quit').
+    """
+    import re as _re
+    parts = cmd_str.strip().split()
+    if not parts:
+        return True
+
+    if parts[0] in ("quit", "exit", "q"):
+        return False
+
+    elif parts[0] == "portfolio":
+        console.print()
+        balances = portfolio.get_balances()
+        health = portfolio.calculate_health_score(balances)
+        portfolio.print_portfolio_table(balances, health)
+
+    elif parts[0] == "dca":
+        symbols = [s.upper() for s in parts[1:]] if len(parts) > 1 else ["BTCUSDT", "ETHUSDT", "BNBUSDT"]
+        console.print(f"\n[dim]{t('cli.fetching_dca', symbols=', '.join(symbols))}[/dim]")
+        dca.print_recommendations(symbols)
+
+    elif parts[0] == "market":
+        symbol = parts[1].upper() if len(parts) > 1 else "BTCUSDT"
+        ctx = market.get_market_context(symbol)
+        fg = ctx["fear_greed"]
+        console.print(Panel(
+            f"{t('market.price')}: [bold]${ctx['price']:,.4f}[/bold]\n"
+            f"{t('market.rsi')}: [bold]{ctx['rsi']}[/bold] ({ctx['rsi_zone_label']})\n"
+            f"{t('market.trend')}: {ctx['trend']}\n"
+            f"{t('market.sma50')}: ${ctx['sma_50']:,.2f}\n"
+            f"{t('market.sma200')}: ${ctx['sma_200']:,.2f}\n"
+            f"{t('market.vs_sma200')}: {ctx['vs_sma200_pct']:+.1f}%\n"
+            f"{t('market.fear_greed')}: {fg['value']} ({fg['classification']})",
+            title=t("market.title", symbol=symbol), border_style="blue"
+        ))
+
+    elif parts[0] == "fg":
+        fg = market.get_fear_greed()
+        val = fg["value"]
+        advice = (
+            t("cli.fg_accumulate") if val < 30 else
+            t("cli.fg_careful") if val > 75 else
+            t("cli.fg_neutral")
+        )
+        console.print(Panel(
+            f"{t('cli.fg_score')}: [bold]{val}/100[/bold]\n"
+            f"{t('cli.fg_status')}: [bold]{fg['classification']}[/bold]\n\n"
+            f"[italic]{advice}[/italic]",
+            title=t("cli.fg_title"), border_style="yellow"
+        ))
+
+    elif parts[0] == "behavior":
+        behavior.print_behavior_report()
+
+    elif parts[0] == "alert":
+        if len(parts) < 4:
+            console.print("[yellow]Usage: alert SYMBOL above/below/rsi_above/rsi_below VALUE[/yellow]")
+        else:
+            sym, cond, val_ = parts[1].upper(), parts[2].lower(), float(parts[3])
+            notes = " ".join(parts[4:]) if len(parts) > 4 else ""
+            alert_mgr.add_alert(sym, cond, val_, notes)
+            console.print(f"[green]{t('alert.set', symbol=sym, condition=cond, threshold=val_)}[/green]")
+
+    elif parts[0] == "alerts":
+        alert_mgr.list_alerts()
+
+    elif parts[0] in ("check-alerts", "checkalerts"):
+        fired = alert_mgr.check_alerts()
+        if not fired:
+            console.print(f"[green]{t('alert.none_triggered')}[/green]")
+        for f in fired:
+            console.print(Panel(f.get("context", ""), title=t("alert.triggered_title", symbol=f["symbol"])))
+
+    elif parts[0] == "learn":
+        topic = parts[1].lower() if len(parts) > 1 else ""
+        if not topic:
+            edu.list_lessons()
+        else:
+            edu.explain(topic)
+
+    elif parts[0] == "project":
+        symbol = parts[1].upper() if len(parts) > 1 else "BTCUSDT"
+        proj = dca.project_accumulation(symbol, months=12)
+        console.print(Panel(
+            f"{t('dca.projection.invested')}: [bold]${proj['total_invested']:,.2f}[/bold]\n"
+            f"{t('dca.projection.value')}: [bold]${proj['projected_value']:,.2f}[/bold]\n"
+            f"{t('dca.projection.roi')}: [bold]+{proj['roi_pct']}%[/bold]\n\n"
+            f"[dim]{proj['note']}[/dim]",
+            title=t("dca.projection.title", symbol=symbol, months=12), border_style="green"
+        ))
+
+    elif parts[0] in ("coach", "weekly", "ask", "models", "model") and ai:
+        if parts[0] == "models":
+            ai.print_models_table()
+        elif parts[0] == "model":
+            if len(parts) > 1:
+                ai.set_model(parts[1])
+                console.print(f"[green]✅ Model set to: {ai.model}[/green]")
+        elif parts[0] == "coach":
+            console.print("[dim]🤖 Calling Claude...[/dim]")
+            balances = portfolio.get_balances()
+            health = portfolio.calculate_health_score(balances)
+            ctx = market.get_market_context("BTCUSDT")
+            fomo = behavior.calculate_fomo_score()
+            over = behavior.calculate_overtrading_index()
+            beh_data = {"fomo_score": fomo["score"], "fomo_label": fomo["label"],
+                        "overtrade_label": over["label"], "panic_list": []}
+            result = ai.coaching_summary(health, ctx, beh_data)
+            ai.print_response("🤖 Coaching Summary", result)
+        elif parts[0] == "weekly":
+            console.print("[dim]🤖 Calling Claude...[/dim]")
+            balances = portfolio.get_balances()
+            health = portfolio.calculate_health_score(balances)
+            ctx = market.get_market_context("BTCUSDT")
+            fomo = behavior.calculate_fomo_score()
+            over = behavior.calculate_overtrading_index()
+            beh_data = {"fomo_score": fomo["score"], "fomo_label": fomo["label"],
+                        "overtrade_label": over["label"], "panic_list": []}
+            market_summary = {"trend": ctx["trend"], "fg_value": ctx["fear_greed"]["value"],
+                              "fg_label": ctx["fear_greed"]["classification"]}
+            dca_recs = [dca.get_recommendation(s) for s in ["BTCUSDT", "ETHUSDT", "BNBUSDT"]]
+            result = ai.weekly_brief(health, beh_data, market_summary, dca_recs)
+            ai.print_response("📋 Weekly Brief", result)
+        elif parts[0] == "ask":
+            question = " ".join(parts[1:])
+            console.print("[dim]🤖 Calling Claude...[/dim]")
+            balances = portfolio.get_balances() if client else []
+            health = portfolio.calculate_health_score(balances) if balances else {}
+            total = health.get("total_usd") or 1
+            for b in balances:
+                b["pct"] = b["usd_value"] / total * 100
+            fomo = behavior.calculate_fomo_score()
+            over = behavior.calculate_overtrading_index()
+            fg = market.get_fear_greed()
+            mentioned = {w.upper() for w in _re.findall(r"\b[A-Za-z]{2,10}\b", question)
+                         if w.upper() in {"BTC","ETH","BNB","ADA","DOGE","SHIB","FLOKI","ANKR",
+                                           "SOL","XRP","DOT","MATIC","AVAX","LINK","UNI","SCR"}} | {"BTC"}
+            coin_data = {}
+            for sym in mentioned:
+                try:
+                    coin_data[sym] = market.get_market_context(sym + "USDT")
+                except Exception:
+                    pass
+            ctx_dict = {
+                "total_usd": health.get("total_usd", 0), "score": health.get("score"),
+                "grade": health.get("grade"), "stable_pct": health.get("stable_pct", 0),
+                "suggestions": health.get("suggestions", []), "holdings": balances[:10],
+                "fg_value": fg["value"], "fg_label": fg["classification"],
+                "fomo_score": fomo.get("score", 0), "overtrade_label": over.get("label", "?"),
+                "panic_count": 0, "coin_data": coin_data,
+            }
+            result = ai.chat(question, ctx_dict)
+            ai.print_response("💬 Claude Answer", result, "green")
+    elif parts[0] in ("coach", "weekly", "ask") and not ai:
+        console.print("[yellow]⚠️  No Anthropic API key configured. Add ANTHROPIC_API_KEY to .env[/yellow]")
+
+    elif parts[0] == "lang":
+        if len(parts) > 1 and parts[1].lower() in AVAILABLE_LANGS:
+            set_lang(parts[1].lower())
+            console.print(f"[green]{t('cli.lang_switched')}[/green]")
+        else:
+            lang_list = "\n".join(
+                f"  {'→' if code == get_lang() else ' '} [cyan]{code}[/cyan]  {label}"
+                for code, label in AVAILABLE_LANGS.items()
+            )
+            console.print(t("cli.lang_list", langs=lang_list))
+
+    elif parts[0] == "help":
+        console.print(t("cli.help"))
+
+    else:
+        console.print(f"[yellow]{t('general.unknown_cmd', cmd=parts[0])}[/yellow]")
+
+    return True
+
+
 def main():
     parser = argparse.ArgumentParser(description="BinanceCoach — AI Trading Behavior Coach")
     parser.add_argument("--telegram", action="store_true", help="Run as Telegram bot")
     parser.add_argument("--demo", action="store_true", help="Demo mode (no API keys)")
     parser.add_argument("--lang", choices=["en", "nl"], default=None, help="Language (en/nl)")
+    parser.add_argument("--command", "-c", type=str, default=None,
+                        help="Run a single command non-interactively (for skill/scripting use)")
     args = parser.parse_args()
 
     if args.lang:
@@ -403,6 +623,8 @@ def main():
         run_demo()
     elif args.telegram:
         run_telegram()
+    elif args.command:
+        run_command(args.command)
     else:
         run_cli()
 

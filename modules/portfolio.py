@@ -3,7 +3,6 @@ portfolio.py — Portfolio analysis & health scoring
 Fetches balances, calculates health score, detects concentration risk
 """
 
-import numpy as np
 from binance.spot import Spot
 from rich.console import Console
 from rich.table import Table

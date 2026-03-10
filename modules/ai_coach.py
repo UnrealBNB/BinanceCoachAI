@@ -9,16 +9,19 @@ Features:
 - Dynamic model selection via Anthropic API
 
 Model is configurable via .env AI_MODEL or at runtime with 'model' command.
-Default: claude-haiku-3-5 (fast + cost-efficient for frequent use)
+Default: claude-haiku-4-5-20251001 (fast + cost-efficient for frequent use)
 """
 
 import os
+import logging
 import anthropic
 from datetime import datetime
 from rich.console import Console
 from rich.panel import Panel
 from rich.markdown import Markdown
 from modules.i18n import t, get_lang
+
+logger = logging.getLogger(__name__)
 
 console = Console()
 
@@ -90,7 +93,6 @@ class AICoach:
             raise ValueError("ANTHROPIC_API_KEY not set. Add it to your .env file.")
         self.client = anthropic.Anthropic(api_key=api_key)
         self.model = model or os.getenv("AI_MODEL", "claude-haiku-4-5-20251001")
-        self.lang = get_lang()
 
     def _lang_instruction(self) -> str:
         lang = get_lang()
@@ -115,7 +117,8 @@ class AICoach:
             # Sort: newest first
             result.sort(key=lambda x: x.get("created") or "", reverse=True)
             return result
-        except Exception:
+        except Exception as exc:
+            logger.debug("Could not fetch models from API: %s", exc)
             return KNOWN_MODELS
 
     def set_model(self, model_id: str):

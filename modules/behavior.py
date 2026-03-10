@@ -107,9 +107,9 @@ class BehaviorCoach:
         # So we approximate by clustering: rapid buys near local highs
         fomo_score = 0
         if fg_val > 75:
-            fomo_score += 30  # Currently buying in extreme greed
+            fomo_score += 40  # Currently buying in extreme greed
         elif fg_val > 60:
-            fomo_score += 15
+            fomo_score += 20
 
         # Overbuying: many buys in short windows (buying the hype)
         buy_times = sorted([row[0] for row in buys])
@@ -117,9 +117,10 @@ class BehaviorCoach:
         for i in range(1, len(buy_times)):
             if buy_times[i] - buy_times[i-1] < 3600_000:  # within 1 hour
                 rapid_buys += 1
-        fomo_score += min(30, rapid_buys * 5)
+        fomo_score += min(60, rapid_buys * 10)
+        fomo_score = min(100, fomo_score)  # Cap at 100
 
-        label = t("behavior.fomo.label.low") if fomo_score < 20 else t("behavior.fomo.label.med") if fomo_score < 50 else t("behavior.fomo.label.high")
+        label = t("behavior.fomo.label.low") if fomo_score < 30 else t("behavior.fomo.label.med") if fomo_score < 65 else t("behavior.fomo.label.high")
         return {
             "score": fomo_score,
             "label": label,

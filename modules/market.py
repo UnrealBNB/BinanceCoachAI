@@ -93,10 +93,32 @@ class MarketData:
         """
         Aggregate all market context for a symbol.
         Returns a rich dict with price, RSI, MAs, F&G, and interpretations.
+        Fetches klines once and computes RSI + MAs from the same dataset.
         """
         price = self.get_price(symbol)
-        rsi = self.get_rsi(symbol)
-        mas = self.get_moving_averages(symbol)
+        # Fetch klines once (limit=210 covers both RSI(14) and SMA(200))
+        df = self.get_klines(symbol, interval="1d", limit=210)
+        # Compute RSI from shared klines
+        delta = df["close"].diff()
+        gain = delta.clip(lower=0)
+        loss = -delta.clip(upper=0)
+        avg_gain = gain.ewm(span=14, adjust=False).mean()
+        avg_loss = loss.ewm(span=14, adjust=False).mean()
+        rs = avg_gain / avg_loss
+        rsi_series = 100 - (100 / (1 + rs))
+        rsi = round(float(rsi_series.iloc[-1]), 2)
+        # Compute MAs from same klines
+        import math
+        def safe(val):
+            f = float(val)
+            return round(f, 4) if not math.isnan(f) else 0.0
+        close = df["close"]
+        mas = {
+            "sma_50":  safe(close.rolling(50).mean().iloc[-1]),
+            "sma_200": safe(close.rolling(200).mean().iloc[-1]),
+            "ema_21":  safe(close.ewm(span=21, adjust=False).mean().iloc[-1]),
+            "current": safe(close.iloc[-1]),
+        }
         fg = self.get_fear_greed()
 
         # Price vs MAs interpretation

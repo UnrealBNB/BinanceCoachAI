@@ -154,7 +154,7 @@ class DCAAdvisor:
 
     def print_recommendations(self, symbols: list[str]):
         """Print DCA recommendations for multiple symbols."""
-        profile_label = t(f"dca.profile.{self.risk_profile}", **{}) if f"dca.profile.{self.risk_profile}" else self.risk_profile.title()
+        profile_label = t(f"dca.profile.{self.risk_profile}") or self.risk_profile.title()
         table = Table(title=f"📐 {t('dca.title', budget=self.monthly_budget, profile=profile_label)}")
         table.add_column(t("dca.col.symbol"), style="cyan")
         table.add_column(t("dca.col.price"), style="white")

@@ -33,6 +33,14 @@ AUTHORIZED_USER = int(_uid_raw) if _uid_raw.isdigit() else 0
 
 HTML = "HTML"
 
+# Coin symbols to detect in user questions for /ask context enrichment
+KNOWN_SYMBOLS = {
+    "BTC", "ETH", "BNB", "ADA", "DOGE", "SHIB", "FLOKI", "ANKR",
+    "SOL", "XRP", "DOT", "MATIC", "AVAX", "LINK", "UNI", "TRX",
+    "LTC", "ATOM", "NEAR", "APT", "ARB", "OP", "INJ", "SCR",
+    "PEPE", "WIF", "BONK", "TRUMP", "FARTCOIN",
+}
+
 BOT_COMMANDS = [
     BotCommand("start",       "Show help & command list"),
     BotCommand("portfolio",   "Portfolio health score & analysis"),
@@ -86,7 +94,6 @@ def build_app(client: Spot, market: MarketData):
         risk_profile=os.getenv("RISK_PROFILE", "moderate"),
     )
     behavior_mod  = BehaviorCoach(client, market)
-    edu_mod       = EducationModule()  # noqa: F841
     alert_mgr     = AlertManager(market, telegram_notify=None)
 
     try:
@@ -123,6 +130,12 @@ def build_app(client: Spot, market: MarketData):
         return True
 
     def collect_behavior() -> dict:
+        # Sync recent trades first so analysis reflects actual history
+        try:
+            behavior_mod.sync_trades(["DOGEUSDT", "ADAUSDT", "BTCUSDT", "ETHUSDT",
+                                       "BNBUSDT", "SHIBUSDT", "ANKRUSDT", "FLOKIUSDT"], days=30)
+        except Exception:
+            pass  # Non-fatal: analysis works on cached DB data
         fomo      = behavior_mod.calculate_fomo_score()
         overtrade = behavior_mod.calculate_overtrading_index()
         panic     = behavior_mod.detect_panic_sells()
@@ -311,8 +324,15 @@ def build_app(client: Spot, market: MarketData):
             return
         symbol    = args[0].upper()
         condition = args[1].lower()
-        threshold = float(args[2])
-        notes     = " ".join(args[3:]) if len(args) > 3 else ""
+        if condition not in ("above", "below", "rsi_above", "rsi_below"):
+            await _send(update, t("tg.alert_usage"))
+            return
+        try:
+            threshold = float(args[2])
+        except ValueError:
+            await _send(update, t("tg.alert_usage"))
+            return
+        notes = " ".join(args[3:]) if len(args) > 3 else ""
         alert_mgr.add_alert(symbol, condition, threshold, notes)
         await _send(update, t("tg.alert_set",
                                symbol=e(symbol),
@@ -376,8 +396,8 @@ def build_app(client: Spot, market: MarketData):
                     " (" + e(str(fomo_raw.get("current_fg_label", "?"))) + ")",
                 "",
                 t("tg.behavior.overtrade") + " " + e(beh["overtrade_label"]),
-                t("behavior.overtrade.total") + ": " + str(beh["total_trades"]) +
-                    " (" + str(beh["per_week"]) + "/week)",
+                t("behavior.overtrade.total") + ": " + str(beh["total_trades"]),
+                t("behavior.overtrade.week") + ": " + str(beh["per_week"]),
             ]
             if over_raw.get("tip"):
                 lines.append("💡 " + italic(e(over_raw["tip"])))
@@ -499,14 +519,6 @@ def build_app(client: Spot, market: MarketData):
 
     # ── /ask ──────────────────────────────────────────────────────────────
 
-    # Known symbols to detect in user questions
-    _KNOWN_SYMBOLS = {
-        "BTC", "ETH", "BNB", "ADA", "DOGE", "SHIB", "FLOKI", "ANKR",
-        "SOL", "XRP", "DOT", "MATIC", "AVAX", "LINK", "UNI", "TRX",
-        "LTC", "ATOM", "NEAR", "APT", "ARB", "OP", "INJ", "SCR",
-        "PEPE", "WIF", "BONK", "TRUMP", "FARTCOIN",
-    }
-
     async def ask_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not await auth(update): return
         if not await require_ai(update): return
@@ -538,7 +550,7 @@ def build_app(client: Spot, market: MarketData):
             mentioned_symbols = set()
             for w in words:
                 upper = w.upper()
-                if upper in _KNOWN_SYMBOLS:
+                if upper in KNOWN_SYMBOLS:
                     mentioned_symbols.add(upper)
             # Also check holdings — if user says "my portfolio" fetch BTC too
             if not mentioned_symbols or any(

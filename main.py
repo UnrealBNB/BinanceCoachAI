@@ -327,10 +327,10 @@ Note: {proj['note']}
                 try:
                     # Full context: portfolio + behavior + coin data
                     if client:
-                        _balances = portfolio_mod.get_balances()
-                        _health   = portfolio_mod.calculate_health_score(_balances)
-                        _beh      = behavior_mod.calculate_fomo_score()
-                        _over     = behavior_mod.calculate_overtrading_index()
+                        _balances = portfolio.get_balances()
+                        _health   = portfolio.calculate_health_score(_balances)
+                        _beh      = behavior.calculate_fomo_score()
+                        _over     = behavior.calculate_overtrading_index()
                         _total    = _health["total_usd"] or 1
                         for _b in _balances:
                             _b["pct"] = _b["usd_value"] / _total * 100

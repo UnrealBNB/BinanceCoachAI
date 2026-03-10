@@ -109,13 +109,6 @@ def tlesson(topic: str) -> dict | None:
     }
 
 
-# Re-export LESSONS keys (language-independent) for iteration
-@property
-def _lessons_keys():
-    _, lessons = _load("en")
-    return list(lessons.keys())
-
-
 # Convenience: iterate lesson keys without caring about language
 def lesson_keys() -> list[str]:
     """Return all available lesson topic keys."""

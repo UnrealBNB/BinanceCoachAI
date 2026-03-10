@@ -4,11 +4,13 @@ Alerts tell you not just WHAT happened, but WHY it matters
 """
 
 import sqlite3
-import json
+import logging
 from pathlib import Path
 from datetime import datetime
 from rich.console import Console
 from modules.i18n import t
+
+logger = logging.getLogger(__name__)
 
 console = Console()
 
@@ -98,12 +100,11 @@ class AlertManager:
                         "context": context_msg,
                         "notes": notes,
                     })
+                    # Note: telegram_notify is async — called externally by the bot
+                    # after check_alerts() returns, so we don't call it here directly.
 
-                    if self.telegram_notify:
-                        self.telegram_notify(context_msg)
-
-            except Exception as e:
-                pass
+            except Exception as exc:
+                logger.warning("Alert check failed for %s: %s", symbol, exc)
 
         return fired
 

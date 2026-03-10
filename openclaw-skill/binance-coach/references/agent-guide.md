@@ -2,6 +2,21 @@
 
 This file contains full dispatch instructions for OpenClaw. Read this when you need to know exactly which command to run for a given user request.
 
+## Updating BinanceCoach
+
+When a user says "update BinanceCoach", "upgrade the skill", or "get the latest version":
+
+```bash
+scripts/bc.sh update
+```
+
+This does three things automatically:
+1. `clawhub update binance-coach` — pulls latest skill files from ClaWHub
+2. Copies new bundled `src/` to `~/workspace/binance-coach/` — preserves `.env` and `data/`
+3. Re-runs `pip install` in case dependencies changed
+
+The user's API keys and alert data are never touched.
+
 ## Setup Check (always do this first)
 
 ```bash

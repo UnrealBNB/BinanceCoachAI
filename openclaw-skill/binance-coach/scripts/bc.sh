@@ -98,6 +98,36 @@ case "$COMMAND" in
         SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
         exec bash "$SCRIPT_DIR/setup.sh"
         ;;
+    update)
+        echo "🔄 Updating BinanceCoach skill..."
+        # Step 1: Update skill files via ClaWHub
+        if command -v clawhub &>/dev/null; then
+            clawhub update binance-coach && echo "✅ Skill updated from ClaWHub"
+        else
+            echo "⚠️  clawhub CLI not found — skipping registry update"
+        fi
+        # Step 2: Copy new bundled src to workspace (preserve .env and data/)
+        SKILL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+        SRC_DIR="$SKILL_DIR/src"
+        if [[ -d "$SRC_DIR" && -f "$SRC_DIR/main.py" && -d "$PROJECT" ]]; then
+            # Back up .env and data/
+            TMP_ENV=$(mktemp)
+            cp "$PROJECT/.env" "$TMP_ENV" 2>/dev/null || true
+            # Copy new source (excludes .env and data/)
+            rsync -a --exclude='.env' --exclude='data/' "$SRC_DIR/" "$PROJECT/" 2>/dev/null || \
+            cp -r "$SRC_DIR/." "$PROJECT/"
+            # Restore .env
+            [[ -f "$TMP_ENV" ]] && cp "$TMP_ENV" "$PROJECT/.env"
+            rm -f "$TMP_ENV"
+            echo "✅ Source updated at $PROJECT"
+        else
+            echo "⚠️  Bundled src not found — re-run setup to reinstall"
+        fi
+        # Step 3: Re-install deps in case requirements changed
+        pip3 install --break-system-packages -q -r "$PROJECT/requirements.txt" 2>/dev/null || true
+        echo "✅ BinanceCoach updated successfully"
+        echo "   Your .env and alert data are preserved."
+        ;;
     help|--help|-h)
         echo "BinanceCoach — commands:"
         echo "  portfolio            Portfolio health score & analysis"
@@ -117,6 +147,7 @@ case "$COMMAND" in
         echo "  telegram             Start standalone Telegram bot"
         echo "  demo                 Demo mode (no API keys needed)"
         echo "  setup                First-time setup wizard"
+        echo "  update               Update to latest version from ClaWHub"
         ;;
     *)
         echo "❌ Unknown command: $COMMAND"

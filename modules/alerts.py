@@ -57,7 +57,7 @@ class AlertManager:
         """, (symbol, condition, threshold, datetime.utcnow().isoformat(), notes))
         conn.commit()
         conn.close()
-        console.print(f"[green]{t('alert.set', symbol=symbol, condition=condition, threshold=threshold)}[/green]")
+        # Note: confirmation printed by caller (_dispatch_command / CLI)
 
     def check_alerts(self) -> list[dict]:
         """Check all untriggered alerts and fire any that match."""

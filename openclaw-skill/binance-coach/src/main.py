@@ -456,9 +456,17 @@ def _dispatch_command(cmd_str, client, market, portfolio, dca, alert_mgr, behavi
 
     elif parts[0] == "portfolio":
         console.print()
-        balances = portfolio.get_balances()
-        health = portfolio.calculate_health_score(balances)
-        portfolio.print_portfolio_table(balances, health)
+        try:
+            balances = portfolio.get_balances()
+            health = portfolio.calculate_health_score(balances)
+            portfolio.print_portfolio_table(balances, health)
+        except Exception as e:
+            msg = str(e)
+            if "401" in msg or "Invalid API-key" in msg:
+                console.print("[red]❌ Binance API error: Invalid or expired API key.[/red]")
+                console.print("[dim]→ Go to binance.com → API Management → check your key is active and has 'Enable Reading' permission.[/dim]")
+            else:
+                console.print(f"[red]❌ Portfolio error: {e}[/red]")
 
     elif parts[0] == "dca":
         symbols = [s.upper() for s in parts[1:]] if len(parts) > 1 else ["BTCUSDT", "ETHUSDT", "BNBUSDT"]

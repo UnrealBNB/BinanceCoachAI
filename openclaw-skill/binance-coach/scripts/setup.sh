@@ -79,11 +79,20 @@ set_env "BINANCE_API_SECRET" "$BINANCE_SECRET"
 
 # ── Anthropic API ─────────────────────────────────────────────────────────────
 echo ""
-echo "2️⃣  Anthropic API Key (for AI coaching)"
-echo "   → console.anthropic.com → API Keys → Create Key"
+echo "2️⃣  Anthropic API Key"
+echo "   ℹ️  If you're using BinanceCoach via OpenClaw (plugin mode),"
+echo "      you can SKIP this — OpenClaw already has Claude built in."
+echo "      Only needed for the standalone Telegram bot or CLI."
 echo ""
-ANTHROPIC_KEY="$(prompt_key "ANTHROPIC_API_KEY" "Anthropic API Key")"
-set_env "ANTHROPIC_API_KEY" "$ANTHROPIC_KEY"
+read -rp "  Set up Anthropic API key? [y/N]: " setup_anthropic
+if [[ "${setup_anthropic,,}" == "y" ]]; then
+    echo "   → console.anthropic.com → API Keys → Create Key"
+    echo ""
+    ANTHROPIC_KEY="$(prompt_key "ANTHROPIC_API_KEY" "Anthropic API Key")"
+    set_env "ANTHROPIC_API_KEY" "$ANTHROPIC_KEY"
+else
+    echo "   ⏭️  Skipped — OpenClaw will handle AI analysis natively."
+fi
 
 # ── Telegram (optional) ───────────────────────────────────────────────────────
 echo ""

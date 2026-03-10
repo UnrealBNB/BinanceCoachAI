@@ -30,14 +30,18 @@ OpenClaw will run the setup script automatically, which:
 1. **Clones** `UnrealBNB/BinanceCoachAI` from GitHub
 2. **Installs** all Python dependencies
 3. **Asks you interactively** for your API keys:
-   - Binance API key + secret (read-only)
-   - Anthropic API key (for Claude AI coaching)
-   - Telegram bot token + your user ID (optional)
+   - Binance API key + secret (read-only) ← **required**
+   - Anthropic API key ← **not needed in OpenClaw mode** (see below)
+   - Telegram bot token + your user ID (optional, for standalone bot)
    - Language preference (English or Dutch)
    - Risk profile (conservative / moderate / aggressive)
    - Monthly DCA budget
 4. **Writes everything to `.env`** — no manual file editing
-5. **Verifies** Binance and Anthropic connectivity
+5. **Verifies** Binance connectivity
+
+> 💡 **No Anthropic API key needed when using OpenClaw.**  
+> OpenClaw is already powered by Claude. BinanceCoach fetches your live Binance data, and OpenClaw does the AI analysis natively — no extra API key or cost required.  
+> An Anthropic key is only needed if you run the **standalone Telegram bot** directly (without OpenClaw).
 
 #### Use it
 

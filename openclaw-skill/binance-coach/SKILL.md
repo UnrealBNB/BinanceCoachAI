@@ -7,13 +7,25 @@ description: AI-powered crypto trading behavior coach for Binance users. Analyze
 
 AI-powered crypto trading behavior coach. Connects to the user's Binance account (read-only) and provides portfolio analysis, behavioral coaching, and smart DCA recommendations via Claude.
 
-## Setup
+## Setup (run this first)
 
 ```bash
-scripts/setup.sh          # First-time setup: deps + .env
+scripts/setup.sh
 ```
 
-After setup, configure `~/.binance-coach/.env` with API keys (see `references/setup.md`).
+`setup.sh` fully automates first-time setup:
+1. Clones `https://github.com/UnrealBNB/BinanceCoachAI.git` into `~/workspace/binance-coach/`
+2. Installs all Python dependencies (`pip install -r requirements.txt`)
+3. Interactively prompts for: Binance API keys, Anthropic API key, Telegram bot token (optional), language, risk profile, monthly DCA budget
+4. Writes all answers to `.env` automatically
+5. Verifies Binance + Anthropic connectivity
+
+**When to run setup:**
+- First time the skill is used on a new machine
+- When a user says "set up BinanceCoach", "install the bot", "configure my keys"
+- When `bc.sh <command>` returns "project not found" or API errors
+
+**After setup**, all commands work immediately. No manual file editing needed.
 
 ## Running Commands
 

@@ -99,7 +99,7 @@ echo ""
 echo "3️⃣  Telegram Bot"
 echo "   ℹ️  If you're using BinanceCoach via OpenClaw, skip this too."
 echo "      OpenClaw already handles Telegram — no separate bot needed."
-echo "      Only needed if you want a dedicated @BinanceCoachAIBot"
+echo "      Only needed if you want a dedicated Telegram bot of your own"
 echo "      running independently of OpenClaw."
 echo ""
 read -rp "  Set up standalone Telegram bot? [y/N]: " setup_tg

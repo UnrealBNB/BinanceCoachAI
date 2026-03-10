@@ -378,14 +378,27 @@ Note: {proj['note']}
 
 def run_telegram():
     """Start the Telegram bot."""
+    import asyncio
     from modules.market import MarketData
     from bot.telegram_bot import build_app
+
+    token = os.getenv("TELEGRAM_BOT_TOKEN", "")
+    if not token:
+        console.print("[red]❌ TELEGRAM_BOT_TOKEN not set in .env[/red]")
+        console.print("[dim]Add it with: TELEGRAM_BOT_TOKEN=your_token_here[/dim]")
+        return
 
     client = init_clients()
     market = MarketData(client)
     app = build_app(client, market)
 
-    console.print("[green]🤖 Starting Telegram bot...[/green]")
+    async def _print_bot_info():
+        info = await app.bot.get_me()
+        console.print(f"[green]🤖 Bot started: @{info.username} (ID: {info.id})[/green]")
+        console.print(f"[dim]Authorized user: {os.getenv('TELEGRAM_USER_ID', 'anyone')}[/dim]")
+
+    asyncio.get_event_loop().run_until_complete(_print_bot_info()) if not app.running else None
+    console.print("[green]🤖 Starting Telegram bot... (Ctrl+C to stop)[/green]")
     app.run_polling()
 
 

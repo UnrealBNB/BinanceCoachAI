@@ -246,7 +246,7 @@ STRINGS = {
     "tg.ai.error":              "❌ AI error: {error}",
     "tg.error":                 "❌ Error: {error}",
     "tg.checking_alerts":       "🔍 Checking alerts...",
-    "tg.bot_online":            "✅ BinanceCoachAIBot is online! Send /start for the menu.",
+    "tg.bot_online":            "✅ Bot is online! Send /start for the menu.",
 }
 
 LESSONS = {

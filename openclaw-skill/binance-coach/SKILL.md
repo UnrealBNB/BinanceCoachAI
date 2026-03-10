@@ -23,38 +23,65 @@ OpenClaw is already Claude and already handles Telegram. BinanceCoach provides t
 
 The `bc.sh coach`, `bc.sh weekly`, `bc.sh ask`, and `bc.sh telegram` commands exist for standalone use only. In OpenClaw mode, just ask naturally — the data commands are all you need.
 
-## Setup (run this first)
+## Conversational Setup (IMPORTANT — read this)
+
+**Never assume keys are configured. Always check first:**
 
 ```bash
-scripts/setup.sh
+ls ~/workspace/binance-coach/.env 2>/dev/null || echo "NOT CONFIGURED"
 ```
 
-`setup.sh` fully automates first-time setup:
-1. Clones `https://github.com/UnrealBNB/BinanceCoachAI.git` into `~/workspace/binance-coach/`
-2. Installs all Python dependencies (`pip install -r requirements.txt`)
-3. Interactively prompts for: Binance API keys, Anthropic API key, Telegram bot token (optional), language, risk profile, monthly DCA budget
-4. Writes all answers to `.env` automatically
-5. Verifies Binance + Anthropic connectivity
+### First-time setup flow
 
-**When to run setup:**
-- First time the skill is used on a new machine
-- When a user says "set up BinanceCoach", "install the bot", "configure my keys"
-- When `bc.sh <command>` returns "project not found" or API errors
+When the user asks to set up BinanceCoach, or when `.env` is missing, follow this conversational flow — ask each question in chat, then write to `.env`:
 
-**After setup**, all commands work immediately. No manual file editing needed.
+**Step 1 — Binance API keys (required)**
+Ask: "Go to binance.com → Account → API Management → Create API (Read Only). Paste your API Key and Secret here."
+Then write `BINANCE_API_KEY` and `BINANCE_API_SECRET` to `.env`.
+
+**Step 2 — Preferences (optional, have sensible defaults)**
+Ask: "What's your monthly DCA budget (default: $500) and risk profile: conservative / moderate / aggressive (default: moderate)?"
+
+**Step 3 — Language (optional)**
+Ask: "Preferred language: English (en) or Dutch (nl)? (default: en)"
+
+**Step 4 — Telegram bot (optional, separate feature)**
+Only ask if user explicitly wants a standalone Telegram bot.
+If yes: "Create a bot via @BotFather on Telegram: send /newbot, pick a name and username, copy the token. Also send a message to @userinfobot to get your Telegram user ID."
+Then write `TELEGRAM_BOT_TOKEN` and `TELEGRAM_USER_ID` to `.env`.
+Start with: `scripts/bc.sh telegram`
+
+**Never hardcode bot names or tokens.** Each user creates their own bot via @BotFather. The bot name is entirely up to them.
+
+### Updating existing config
+
+If the user says "change my DCA budget" / "switch to Dutch" / "add telegram" etc — just update the relevant line in `.env` directly. No need to re-run full setup.
+
+```bash
+# Example: update a single setting
+sed -i '' 's/^LANGUAGE=.*/LANGUAGE=nl/' ~/workspace/binance-coach/.env
+sed -i '' 's/^DCA_BUDGET_MONTHLY=.*/DCA_BUDGET_MONTHLY=750/' ~/workspace/binance-coach/.env
+```
+
+### Full .env reference
+
+```env
+BINANCE_API_KEY=...          # required
+BINANCE_API_SECRET=...       # required
+LANGUAGE=en                  # en or nl
+RISK_PROFILE=moderate        # conservative / moderate / aggressive
+DCA_BUDGET_MONTHLY=500       # monthly budget in USD
+AI_MODEL=claude-haiku-4-5-20251001   # Claude model for standalone mode
+TELEGRAM_BOT_TOKEN=...       # optional — only for standalone bot
+TELEGRAM_USER_ID=...         # optional — your Telegram numeric user ID
+```
 
 ## Running Commands
 
-All commands run via the wrapper:
+All commands run via:
 
 ```bash
 scripts/bc.sh <command> [args]
-```
-
-Or directly:
-
-```bash
-cd "$(scripts/bc.sh --path)" && python3 main.py
 ```
 
 ## Key Commands
@@ -69,25 +96,23 @@ cd "$(scripts/bc.sh --path)" && python3 main.py
 | Behavioral analysis | `scripts/bc.sh behavior` |
 | Set price alert | `scripts/bc.sh alert BTCUSDT above 70000` |
 | List alerts | `scripts/bc.sh alerts` |
-| Educational lesson | `scripts/bc.sh learn rsi_oversold` |
+| Check triggered alerts | `scripts/bc.sh check-alerts` |
+| Educational lesson | `scripts/bc.sh learn dca` |
 | 12-month DCA projection | `scripts/bc.sh project BTCUSDT` |
-| AI coaching summary | `scripts/bc.sh coach` |
-| Weekly AI brief | `scripts/bc.sh weekly` |
-| Ask Claude a question | `scripts/bc.sh ask "should I buy more DOGE?"` |
-| Start Telegram bot | `scripts/bc.sh telegram` |
+| Start standalone Telegram bot | `scripts/bc.sh telegram` |
 
 ## Output Handling
 
 - Commands print rich terminal output — relay key findings to the user
-- For `coach`, `weekly`, `ask`: the AI response is the full answer; present it directly
-- For `portfolio`: summarise score, grade, top holdings, and suggestions
-- For `dca`: share the multiplier and weekly amount for each coin, plus the rationale
-- For `behavior`: highlight FOMO score, overtrading label, and any panic sells detected
+- For portfolio: summarise score, grade, top holdings, and suggestions
+- For dca: share multiplier and weekly amount per coin, plus rationale
+- For behavior: highlight FOMO score, overtrading label, and any panic sells
+- For AI coaching (coach/weekly/ask): in OpenClaw mode, fetch data yourself and analyze natively — do not call bc.sh coach/weekly/ask (those need Anthropic key)
 
 ## Language
 
-Set language via env: `LANGUAGE=en` (English) or `LANGUAGE=nl` (Nederlands).
-Or per-session: `scripts/bc.sh --lang nl portfolio`
+Set via `.env`: `LANGUAGE=en` or `LANGUAGE=nl`
+Or per-command: `scripts/bc.sh --lang nl portfolio`
 
 ## Full Command Reference
 

@@ -28,177 +28,102 @@ metadata:
         ]
       },
       "env_vars": [
-        {
-          "name": "BINANCE_API_KEY",
-          "description": "Binance read-only API key. Enable Read Only permissions only — no trading or withdrawals.",
-          "required": true,
-          "sensitive": true
-        },
-        {
-          "name": "BINANCE_API_SECRET",
-          "description": "Binance read-only API secret. Required for HMAC SHA256 signing on all authenticated endpoints.",
-          "required": true,
-          "sensitive": true
-        },
-        {
-          "name": "ANTHROPIC_API_KEY",
-          "description": "Anthropic Claude API key — only needed for standalone mode without OpenClaw.",
-          "required": false,
-          "sensitive": true
-        },
-        {
-          "name": "TELEGRAM_BOT_TOKEN",
-          "description": "Telegram bot token from @BotFather — only needed for optional standalone Telegram bot.",
-          "required": false,
-          "sensitive": true
-        },
-        {
-          "name": "TELEGRAM_USER_ID",
-          "description": "Your numeric Telegram user ID — restricts standalone bot to one authorized user.",
-          "required": false,
-          "sensitive": false
-        },
-        {
-          "name": "LANGUAGE",
-          "description": "Display language: en (English) or nl (Nederlands). Default: en.",
-          "required": false,
-          "sensitive": false
-        },
-        {
-          "name": "RISK_PROFILE",
-          "description": "DCA risk profile: conservative, moderate, or aggressive. Default: moderate.",
-          "required": false,
-          "sensitive": false
-        },
-        {
-          "name": "DCA_BUDGET_MONTHLY",
-          "description": "Monthly DCA budget in USD for buy amount calculations. Default: 500.",
-          "required": false,
-          "sensitive": false
-        }
+        { "name": "BINANCE_API_KEY", "description": "Binance read-only API key.", "required": true, "sensitive": true },
+        { "name": "BINANCE_API_SECRET", "description": "Binance read-only API secret for HMAC signing.", "required": true, "sensitive": true },
+        { "name": "ANTHROPIC_API_KEY", "description": "Claude API key — standalone mode only, not needed with OpenClaw.", "required": false, "sensitive": true },
+        { "name": "TELEGRAM_BOT_TOKEN", "description": "Telegram bot token from @BotFather — standalone bot only.", "required": false, "sensitive": true },
+        { "name": "TELEGRAM_USER_ID", "description": "Your Telegram user ID — restricts bot to one authorized user.", "required": false, "sensitive": false },
+        { "name": "LANGUAGE", "description": "en or nl. Default: en.", "required": false, "sensitive": false },
+        { "name": "RISK_PROFILE", "description": "conservative, moderate, or aggressive. Default: moderate.", "required": false, "sensitive": false },
+        { "name": "DCA_BUDGET_MONTHLY", "description": "Monthly DCA budget in USD. Default: 500.", "required": false, "sensitive": false }
       ]
     }
   }
 ---
 
-# BinanceCoach
+# 📊 BinanceCoach
 
-AI-powered crypto trading behavior coach. Connects to the user's Binance account (read-only) and provides portfolio analysis, behavioral coaching, and smart DCA recommendations via Claude.
+> Your AI-powered crypto trading behavior coach — connected to your Binance account.
 
-## Security & Privacy
+BinanceCoach analyzes your live Binance portfolio, spots emotional trading patterns like FOMO and panic selling, and gives you smart DCA buy signals based on RSI and the Fear & Greed index — all via your OpenClaw assistant.
 
-**Read the [SECURITY.md](SECURITY.md) before installing.** Key points:
+---
 
-- Binance API access is **read-only** — no trading, no withdrawals possible
-- Secrets are stored **only** in a local `.env` file, never transmitted to third parties
-- Runtime code is fetched from a **public, auditable** GitHub repo: [UnrealBNB/BinanceCoachAI](https://github.com/UnrealBNB/BinanceCoachAI)
-- Portfolio data is shared with OpenClaw/Claude for analysis — only if you trust your OpenClaw setup
+## ✨ What it does
 
-## How AI coaching works in OpenClaw mode
-
-When used as an OpenClaw skill, **only Binance API credentials are required**:
-
-| | OpenClaw skill | Standalone bot |
-|---|---|---|
-| Binance API key + secret | ✅ Required | ✅ Required |
-| Anthropic API key | ❌ Not needed | ✅ Required |
-| Telegram bot token | ❌ Not needed | ✅ Required |
-
-Note: both key **and** secret are needed even for read-only access — Binance uses HMAC SHA256 signing for all authenticated endpoints (portfolio, trade history). Public endpoints (price, Fear & Greed) work without credentials.
-
-OpenClaw is already Claude and already handles Telegram. BinanceCoach provides the Binance data layer — OpenClaw does the AI analysis and messaging natively.
-
-## Conversational Setup (IMPORTANT — read this)
-
-**Never assume keys are configured. Always check first:**
-
-```bash
-ls ~/workspace/binance-coach/.env 2>/dev/null || echo "NOT CONFIGURED"
-```
-
-### First-time setup flow
-
-When the user asks to set up BinanceCoach, or when `.env` is missing, follow this conversational flow — ask each question in chat, then write to `.env`:
-
-**Step 1 — Binance API keys (required)**
-Ask: "Go to binance.com → Account → API Management → Create API (Read Only). Paste your API Key and Secret here."
-Then write `BINANCE_API_KEY` and `BINANCE_API_SECRET` to `.env`.
-
-**Step 2 — Preferences (optional, have sensible defaults)**
-Ask: "What's your monthly DCA budget (default: $500) and risk profile: conservative / moderate / aggressive (default: moderate)?"
-
-**Step 3 — Language (optional)**
-Ask: "Preferred language: English (en) or Dutch (nl)? (default: en)"
-
-**Step 4 — Telegram bot (optional, separate feature)**
-Only ask if user explicitly wants a standalone Telegram bot.
-If yes: "Create a bot via @BotFather on Telegram: send /newbot, pick a name and username, copy the token. Also send a message to @userinfobot to get your Telegram user ID."
-Then write `TELEGRAM_BOT_TOKEN` and `TELEGRAM_USER_ID` to `.env`.
-Start with: `scripts/bc.sh telegram`
-
-**Never hardcode bot names or tokens.** Each user creates their own bot via @BotFather. The bot name is entirely up to them.
-
-### Updating existing config
-
-```bash
-# Update a single setting
-sed -i '' 's/^LANGUAGE=.*/LANGUAGE=nl/' ~/workspace/binance-coach/.env
-sed -i '' 's/^DCA_BUDGET_MONTHLY=.*/DCA_BUDGET_MONTHLY=750/' ~/workspace/binance-coach/.env
-```
-
-### Full .env reference
-
-```env
-BINANCE_API_KEY=...          # required
-BINANCE_API_SECRET=...       # required
-LANGUAGE=en                  # en or nl (default: en)
-RISK_PROFILE=moderate        # conservative / moderate / aggressive
-DCA_BUDGET_MONTHLY=500       # monthly budget in USD
-AI_MODEL=claude-haiku-4-5-20251001   # Claude model (standalone mode only)
-TELEGRAM_BOT_TOKEN=...       # optional — standalone bot only
-TELEGRAM_USER_ID=...         # optional — your Telegram numeric user ID
-```
-
-## Running Commands
-
-All commands run via:
-
-```bash
-scripts/bc.sh <command> [args]
-```
-
-## Key Commands
-
-| User asks about | Run |
+| Feature | Description |
 |---|---|
-| Portfolio health/score | `scripts/bc.sh portfolio` |
-| DCA for BTC/ETH/BNB | `scripts/bc.sh dca` |
-| DCA for specific coin | `scripts/bc.sh dca DOGEUSDT` |
-| Fear & Greed index | `scripts/bc.sh fg` |
-| Market data for a coin | `scripts/bc.sh market BTCUSDT` |
-| Behavioral analysis | `scripts/bc.sh behavior` |
-| Set price alert | `scripts/bc.sh alert BTCUSDT above 70000` |
-| List alerts | `scripts/bc.sh alerts` |
-| Check triggered alerts | `scripts/bc.sh check-alerts` |
-| Educational lesson | `scripts/bc.sh learn dca` |
-| 12-month DCA projection | `scripts/bc.sh project BTCUSDT` |
-| Start standalone Telegram bot | `scripts/bc.sh telegram` |
+| 💼 Portfolio Health | Score 0–100 with grade, concentration warnings, stablecoin check |
+| 📐 Smart DCA | Weekly buy amounts per coin, adjusted by RSI × Fear & Greed (25 combinations) |
+| 🧠 Behavior Analysis | FOMO score, overtrading index, panic sell detector, streak tracker |
+| 📈 Market Context | Live price, RSI, SMA50/200, trend direction per coin |
+| 😱 Fear & Greed | Real-time index with buy/hold advice |
+| 🔔 Price Alerts | Set price or RSI alerts, check when triggered |
+| 📚 Education | 7 lessons: RSI, DCA, SMA200, Fear & Greed, concentration risk, panic selling |
+| 📅 Projections | 12-month DCA accumulation projection per coin |
 
-## Output Handling
+---
 
-- Commands print rich terminal output — relay key findings to the user
-- For portfolio: summarise score, grade, top holdings, and suggestions
-- For dca: share multiplier and weekly amount per coin, plus rationale
-- For behavior: highlight FOMO score, overtrading label, and any panic sells
-- For AI coaching: in OpenClaw mode, fetch data and analyze natively — do not call bc.sh coach/weekly/ask (those require a standalone Anthropic key)
+## 🚀 Quick Start
 
-## Language
+**Only one credential required when using with OpenClaw:**
 
-Set via `.env`: `LANGUAGE=en` or `LANGUAGE=nl`
-Or per-command: `scripts/bc.sh --lang nl portfolio`
+```
+Binance API key + secret (read-only)
+```
 
-## Full Command Reference
+> OpenClaw already has Claude built in and handles messaging — no Anthropic key or Telegram bot needed.
 
-See `references/commands.md` for all commands, flags, and output formats.
-See `references/setup.md` for first-time configuration and API key setup.
-See `SECURITY.md` for security model, data handling, and audit instructions.
+Just say: **"analyze my portfolio"** or **"set up BinanceCoach"** — your assistant handles the rest.
+
+---
+
+## 🗣️ Example questions
+
+- *"Analyze my portfolio"*
+- *"What's the Fear & Greed index?"*
+- *"Give me DCA advice for DOGE and ADA"*
+- *"Check my trading behavior"*
+- *"Set an alert if BTC drops below $60,000"*
+- *"Show me the market context for ETH"*
+- *"What's a 12-month DCA projection for BTC?"*
+- *"Explain dollar cost averaging"*
+
+---
+
+## 🔐 Security
+
+- **Read-only Binance API** — no trading, no withdrawals possible
+- Secrets stored **locally only** in `~/workspace/binance-coach/.env`
+- `.env` is gitignored and never committed
+- Source code is fully auditable: [github.com/UnrealBNB/BinanceCoachAI](https://github.com/UnrealBNB/BinanceCoachAI)
+
+See [SECURITY.md](SECURITY.md) for full audit guide.
+
+---
+
+## ⚙️ Optional: Standalone Telegram Bot
+
+Want a dedicated Telegram bot (separate from OpenClaw)?
+
+1. Create a bot via [@BotFather](https://t.me/BotFather) — send `/newbot`
+2. Get your Telegram user ID from [@userinfobot](https://t.me/userinfobot)
+3. Tell your OpenClaw: *"Set up Telegram for BinanceCoach"*
+
+Your assistant will ask for the token and user ID, then start the bot.
+
+---
+
+## 🌍 Languages
+
+Supports **English** and **Dutch (Nederlands)**. Switch anytime:
+
+> *"Switch BinanceCoach to Dutch"*
+
+---
+
+*Built for the Binance OpenClaw AI Assistant Campaign 2026 · [View on GitHub](https://github.com/UnrealBNB/BinanceCoachAI)*
+
+---
+
+<!-- AGENT INSTRUCTIONS — read references/agent-guide.md for full dispatch table -->

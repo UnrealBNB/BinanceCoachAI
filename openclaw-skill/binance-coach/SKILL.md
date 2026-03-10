@@ -9,13 +9,15 @@ AI-powered crypto trading behavior coach. Connects to the user's Binance account
 
 ## How AI coaching works in OpenClaw mode
 
-When used as an OpenClaw skill, **only a Binance API key is required**:
+When used as an OpenClaw skill, **only Binance API credentials are required**:
 
 | | OpenClaw skill | Standalone bot |
 |---|---|---|
-| Binance API key | ✅ Required | ✅ Required |
+| Binance API key + secret | ✅ Required | ✅ Required |
 | Anthropic API key | ❌ Not needed | ✅ Required |
 | Telegram bot token | ❌ Not needed | ✅ Required |
+
+Note: both key **and** secret are needed even for read-only access — Binance uses HMAC SHA256 signing for all authenticated endpoints (portfolio, trade history). Public endpoints (price, Fear & Greed) work without credentials.
 
 OpenClaw is already Claude and already handles Telegram. BinanceCoach provides the Binance data layer — OpenClaw does the AI analysis and messaging natively.
 

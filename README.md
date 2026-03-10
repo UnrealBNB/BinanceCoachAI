@@ -39,15 +39,17 @@ OpenClaw will run the setup script automatically, which:
 4. **Writes everything to `.env`** — no manual file editing
 5. **Verifies** Binance connectivity
 
-> 💡 **Only one thing is required when using OpenClaw: your Binance API key.**
+> 💡 **When using OpenClaw, you only need Binance API credentials.**
 >
 > | | OpenClaw skill | Standalone bot |
 > |---|---|---|
-> | Binance API key | ✅ Required | ✅ Required |
+> | Binance API key + secret | ✅ Required | ✅ Required |
 > | Anthropic API key | ❌ Not needed | ✅ Required |
 > | Telegram bot token | ❌ Not needed | ✅ Required |
 >
-> **Why?** OpenClaw already has Claude built in and already handles Telegram. BinanceCoach just provides the Binance data layer — OpenClaw does the rest natively. No extra accounts, no extra API costs.
+> You need both the **API key and secret** — even for read-only access. The secret signs your requests (HMAC SHA256) so Binance knows they're from you. Without it, portfolio/trade data is inaccessible. Public data (prices, Fear & Greed) works without any key.
+>
+> OpenClaw already has Claude built in and handles Telegram — no extra accounts or API costs beyond Binance.
 
 #### Use it
 

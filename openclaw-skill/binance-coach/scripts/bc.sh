@@ -13,17 +13,20 @@ set -euo pipefail
 
 # ── Find project root ────────────────────────────────────────────────────────
 find_project() {
+    # 1. Explicit env override
     if [[ -n "${BINANCE_COACH_PATH:-}" && -f "$BINANCE_COACH_PATH/main.py" ]]; then
         echo "$BINANCE_COACH_PATH"; return
     fi
-    local candidates=("$HOME/.binance-coach" "$HOME/workspace/binance-coach" "$HOME/binance-coach")
+    # 2. Standard workspace locations
+    local candidates=("$HOME/workspace/binance-coach" "$HOME/.binance-coach" "$HOME/binance-coach")
     for dir in "${candidates[@]}"; do
         if [[ -f "$dir/main.py" && -f "$dir/.env" ]]; then echo "$dir"; return; fi
     done
-    # Relative to skill location (repo-bundled)
-    local skill_dir
-    skill_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-    if [[ -f "$skill_dir/main.py" ]]; then echo "$skill_dir"; return; fi
+    # 3. Bundled src/ inside skill (no setup needed for read-only commands)
+    local skill_dir src_dir
+    skill_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+    src_dir="$skill_dir/src"
+    if [[ -f "$src_dir/main.py" ]]; then echo "$src_dir"; return; fi
     echo ""
 }
 

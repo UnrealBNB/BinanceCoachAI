@@ -1,61 +1,83 @@
 ---
 name: binance-coach
 description: AI-powered crypto trading behavior coach for Binance users. Analyzes live portfolio health, detects emotional trading patterns (FOMO, panic selling, overtrading), provides smart DCA recommendations based on RSI + Fear & Greed index, and delivers personalized AI coaching via Claude. Use when a user asks to: analyze their crypto portfolio, get DCA advice, check market conditions (RSI, Fear & Greed, SMA200), review trading behavior/FOMO/panic sells, get AI coaching on their holdings, set price/RSI alerts, learn about crypto concepts (RSI, DCA, SMA200), start a Telegram trading coach bot, or ask anything about their Binance portfolio.
-homepage: https://github.com/UnrealBNB/BinanceCoachAI
-env_vars:
-  - name: BINANCE_API_KEY
-    description: "Binance read-only API key (binance.com → Account → API Management). Enable Read Only permissions only — never enable trading or withdrawal."
-    required: true
-    sensitive: true
-  - name: BINANCE_API_SECRET
-    description: "Binance read-only API secret. Required alongside API key for HMAC SHA256 request signing on authenticated endpoints."
-    required: true
-    sensitive: true
-  - name: ANTHROPIC_API_KEY
-    description: "Anthropic Claude API key — only needed for the standalone Telegram bot or CLI without OpenClaw. Not required when using via OpenClaw (OpenClaw already provides Claude)."
-    required: false
-    sensitive: true
-  - name: TELEGRAM_BOT_TOKEN
-    description: "Telegram bot token from @BotFather — only needed for the optional standalone Telegram bot. Not required in OpenClaw plugin mode."
-    required: false
-    sensitive: true
-  - name: TELEGRAM_USER_ID
-    description: "Your numeric Telegram user ID (from @userinfobot) — restricts bot access to one authorized user."
-    required: false
-    sensitive: false
-  - name: LANGUAGE
-    description: "Display language: en (English) or nl (Nederlands). Default: en."
-    required: false
-    sensitive: false
-  - name: RISK_PROFILE
-    description: "DCA risk profile: conservative, moderate, or aggressive. Affects DCA multipliers. Default: moderate."
-    required: false
-    sensitive: false
-  - name: DCA_BUDGET_MONTHLY
-    description: "Monthly DCA budget in USD. Used to calculate weekly buy amounts. Default: 500."
-    required: false
-    sensitive: false
+license: MIT
 metadata:
   {
-    "openclaw":
-      {
-        "emoji": "📊",
-        "requires": { "bins": ["python3", "pip3"] },
-        "setup": "scripts/setup.sh",
-        "source": {
-          "type": "github",
-          "repo": "https://github.com/UnrealBNB/BinanceCoachAI",
-          "branch": "main",
-          "install_path": "~/workspace/binance-coach"
+    "openclaw": {
+      "emoji": "📊",
+      "homepage": "https://github.com/UnrealBNB/BinanceCoachAI",
+      "requires": { "bins": ["python3", "pip3"] },
+      "setup": "scripts/setup.sh",
+      "source": {
+        "type": "github",
+        "repo": "https://github.com/UnrealBNB/BinanceCoachAI",
+        "branch": "main",
+        "install_path": "~/workspace/binance-coach"
+      },
+      "security": {
+        "api_access": "read-only",
+        "no_trading": true,
+        "no_withdrawal": true,
+        "data_stored": "local .env + local SQLite DB only",
+        "network_calls": [
+          "api.binance.com (read-only portfolio/market data)",
+          "api.alternative.me (Fear & Greed index)",
+          "api.anthropic.com (optional, standalone mode only)",
+          "api.telegram.org (optional, standalone bot only)"
+        ]
+      },
+      "env_vars": [
+        {
+          "name": "BINANCE_API_KEY",
+          "description": "Binance read-only API key. Enable Read Only permissions only — no trading or withdrawals.",
+          "required": true,
+          "sensitive": true
         },
-        "security": {
-          "api_access": "read-only",
-          "data_stored": "local .env file and local SQLite DB (~/workspace/binance-coach/data/)",
-          "network_calls": ["api.binance.com (read-only)", "api.alternative.me (Fear & Greed index)", "api.anthropic.com (optional, standalone mode only)"],
-          "no_trading": true,
-          "no_withdrawal": true
+        {
+          "name": "BINANCE_API_SECRET",
+          "description": "Binance read-only API secret. Required for HMAC SHA256 signing on all authenticated endpoints.",
+          "required": true,
+          "sensitive": true
+        },
+        {
+          "name": "ANTHROPIC_API_KEY",
+          "description": "Anthropic Claude API key — only needed for standalone mode without OpenClaw.",
+          "required": false,
+          "sensitive": true
+        },
+        {
+          "name": "TELEGRAM_BOT_TOKEN",
+          "description": "Telegram bot token from @BotFather — only needed for optional standalone Telegram bot.",
+          "required": false,
+          "sensitive": true
+        },
+        {
+          "name": "TELEGRAM_USER_ID",
+          "description": "Your numeric Telegram user ID — restricts standalone bot to one authorized user.",
+          "required": false,
+          "sensitive": false
+        },
+        {
+          "name": "LANGUAGE",
+          "description": "Display language: en (English) or nl (Nederlands). Default: en.",
+          "required": false,
+          "sensitive": false
+        },
+        {
+          "name": "RISK_PROFILE",
+          "description": "DCA risk profile: conservative, moderate, or aggressive. Default: moderate.",
+          "required": false,
+          "sensitive": false
+        },
+        {
+          "name": "DCA_BUDGET_MONTHLY",
+          "description": "Monthly DCA budget in USD for buy amount calculations. Default: 500.",
+          "required": false,
+          "sensitive": false
         }
-      }
+      ]
+    }
   }
 ---
 

@@ -30,12 +30,12 @@ A read-only key cannot trade or withdraw even if leaked.
 
 ## What does setup.sh actually do?
 
-1. Clones `https://github.com/UnrealBNB/BinanceCoachAI` (public, auditable)
+1. **Copies bundled source** from inside this skill package to `~/workspace/binance-coach/` — no internet required, no external code fetched
 2. Runs `pip install -r requirements.txt` — standard packages only (python-binance, anthropic, rich, python-dotenv, requests, python-telegram-bot)
 3. Writes your API keys to `~/workspace/binance-coach/.env`
 4. Verifies Binance connectivity
 
-You can audit the full repo before running: [github.com/UnrealBNB/BinanceCoachAI](https://github.com/UnrealBNB/BinanceCoachAI)
+All source code ships inside this skill and is auditable before running. Full source also on GitHub: [github.com/UnrealBNB/BinanceCoachAI](https://github.com/UnrealBNB/BinanceCoachAI)
 
 ---
 

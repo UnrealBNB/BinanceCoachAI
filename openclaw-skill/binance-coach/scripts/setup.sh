@@ -1,190 +1,160 @@
 #!/usr/bin/env bash
 # setup.sh — BinanceCoach first-time setup
-# Clones the project, installs deps, and interactively collects API keys
+# Copies bundled source to ~/workspace/binance-coach, installs deps, configures .env
+# No internet required — all code is bundled inside this skill.
 
 set -euo pipefail
 
+SKILL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 INSTALL_DIR="${BINANCE_COACH_PATH:-$HOME/workspace/binance-coach}"
 
 echo ""
-echo "🤖 BinanceCoach — First-Time Setup"
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "🤖 BinanceCoach — Setup"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
 
-# ── Clone repo if not present ─────────────────────────────────────────────────
-if [[ ! -f "$INSTALL_DIR/main.py" ]]; then
-    echo "📥 Cloning BinanceCoach from GitHub..."
-    mkdir -p "$(dirname "$INSTALL_DIR")"
-    git clone https://github.com/UnrealBNB/BinanceCoachAI.git "$INSTALL_DIR"
-    echo "✅ Cloned to $INSTALL_DIR"
+# ── Install from bundled source ───────────────────────────────────────────────
+if [[ -d "$INSTALL_DIR" && -f "$INSTALL_DIR/main.py" ]]; then
+    echo "📁 Found existing install at $INSTALL_DIR"
+    read -rp "  Reinstall/overwrite? [y/N]: " reinstall
+    [[ "${reinstall,,}" != "y" ]] && echo "  Keeping existing install." || {
+        echo "📦 Copying bundled source to $INSTALL_DIR..."
+        cp -r "$SKILL_DIR/src/." "$INSTALL_DIR/"
+        echo "✅ Updated"
+    }
 else
-    echo "✅ Project already at $INSTALL_DIR"
+    echo "📦 Installing BinanceCoach to $INSTALL_DIR..."
+    mkdir -p "$INSTALL_DIR"
+    cp -r "$SKILL_DIR/src/." "$INSTALL_DIR/"
+    echo "✅ Installed"
 fi
 
-# ── Python dependencies ───────────────────────────────────────────────────────
+# ── Python deps ───────────────────────────────────────────────────────────────
 echo ""
 echo "📦 Installing Python dependencies..."
-cd "$INSTALL_DIR"
-python3 -m pip install -r requirements.txt -q 2>&1 || \
-    pip3 install -r requirements.txt --break-system-packages -q 2>&1
-echo "✅ Dependencies installed"
-
-# ── Load existing .env if present ────────────────────────────────────────────
-ENV_FILE="$INSTALL_DIR/.env"
-if [[ ! -f "$ENV_FILE" ]]; then
-    cp "$INSTALL_DIR/config.example.env" "$ENV_FILE"
+if pip3 install --break-system-packages -q -r "$INSTALL_DIR/requirements.txt" 2>/dev/null || \
+   pip3 install -q -r "$INSTALL_DIR/requirements.txt" 2>/dev/null || \
+   python3 -m pip install -q -r "$INSTALL_DIR/requirements.txt" 2>/dev/null; then
+    echo "✅ Dependencies installed"
+else
+    echo "⚠️  pip install failed — try manually: pip3 install -r $INSTALL_DIR/requirements.txt"
 fi
 
-# Helper: read current value from .env
-get_env() {
-    grep -E "^${1}=" "$ENV_FILE" 2>/dev/null | cut -d'=' -f2- || echo ""
-}
+# ── .env helpers ──────────────────────────────────────────────────────────────
+ENV_FILE="$INSTALL_DIR/.env"
+[[ ! -f "$ENV_FILE" ]] && touch "$ENV_FILE"
 
-# Helper: set value in .env
 set_env() {
     local key="$1" val="$2"
-    if grep -qE "^${key}=" "$ENV_FILE" 2>/dev/null; then
+    if grep -q "^${key}=" "$ENV_FILE" 2>/dev/null; then
         sed -i '' "s|^${key}=.*|${key}=${val}|" "$ENV_FILE"
     else
         echo "${key}=${val}" >> "$ENV_FILE"
     fi
 }
 
-# Helper: prompt with current value shown
 prompt_key() {
-    local key="$1" prompt="$2" current
-    current="$(get_env "$key")"
-    if [[ -n "$current" && "$current" != *"your_"* && "$current" != *"here"* ]]; then
-        read -rp "  $prompt [current: ${current:0:12}...] (Enter to keep): " val
-        [[ -z "$val" ]] && val="$current"
-    else
-        read -rp "  $prompt: " val
-    fi
+    local label="$1"
+    local val=""
+    while [[ -z "$val" ]]; do
+        read -rsp "  $label: " val
+        echo ""
+        [[ -z "$val" ]] && echo "  (required, cannot be empty)"
+    done
     echo "$val"
 }
 
+# ── API Keys ──────────────────────────────────────────────────────────────────
 echo ""
 echo "🔑 API Key Configuration"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━"
-
-# ── Binance API ───────────────────────────────────────────────────────────────
 echo ""
 echo "1️⃣  Binance API Keys (read-only)"
-echo "   → binance.com → Account → API Management → Create API (enable Read Only)"
+echo "   → binance.com → Account → API Management → Create API"
+echo "   → Enable 'Enable Reading' ONLY — no trading, no withdrawals"
 echo ""
-BINANCE_KEY="$(prompt_key "BINANCE_API_KEY" "Binance API Key")"
-BINANCE_SECRET="$(prompt_key "BINANCE_API_SECRET" "Binance API Secret")"
+BINANCE_KEY="$(prompt_key "Binance API Key")"
+BINANCE_SECRET="$(prompt_key "Binance API Secret")"
 set_env "BINANCE_API_KEY" "$BINANCE_KEY"
 set_env "BINANCE_API_SECRET" "$BINANCE_SECRET"
 
-# ── Anthropic API ─────────────────────────────────────────────────────────────
+# ── Preferences ───────────────────────────────────────────────────────────────
 echo ""
-echo "2️⃣  Anthropic API Key"
-echo "   ℹ️  If you're using BinanceCoach via OpenClaw (plugin mode),"
-echo "      you can SKIP this — OpenClaw already has Claude built in."
-echo "      Only needed for the standalone Telegram bot or CLI."
+echo "2️⃣  Preferences"
+echo ""
+read -rp "  Monthly DCA budget in USD (default: 500): " budget
+budget="${budget:-500}"
+set_env "DCA_BUDGET_MONTHLY" "$budget"
+
+read -rp "  Risk profile [conservative/moderate/aggressive] (default: moderate): " risk
+risk="${risk:-moderate}"
+[[ "$risk" != "conservative" && "$risk" != "aggressive" ]] && risk="moderate"
+set_env "RISK_PROFILE" "$risk"
+
+read -rp "  Language [en/nl] (default: en): " lang
+lang="${lang:-en}"
+[[ "$lang" != "nl" ]] && lang="en"
+set_env "LANGUAGE" "$lang"
+
+set_env "AI_MODEL" "claude-haiku-4-5-20251001"
+
+# ── Anthropic (optional) ──────────────────────────────────────────────────────
+echo ""
+echo "3️⃣  Anthropic API Key"
+echo "   ℹ️  Not needed if using via OpenClaw — skip this."
+echo "      Only required for the standalone Telegram bot or CLI."
 echo ""
 read -rp "  Set up Anthropic API key? [y/N]: " setup_anthropic
 if [[ "${setup_anthropic,,}" == "y" ]]; then
-    echo "   → console.anthropic.com → API Keys → Create Key"
-    echo ""
-    ANTHROPIC_KEY="$(prompt_key "ANTHROPIC_API_KEY" "Anthropic API Key")"
+    ANTHROPIC_KEY="$(prompt_key "Anthropic API Key")"
     set_env "ANTHROPIC_API_KEY" "$ANTHROPIC_KEY"
 else
-    echo "   ⏭️  Skipped — OpenClaw will handle AI analysis natively."
+    echo "   ⏭️  Skipped."
 fi
 
 # ── Telegram (optional) ───────────────────────────────────────────────────────
 echo ""
-echo "3️⃣  Telegram Bot"
-echo "   ℹ️  If you're using BinanceCoach via OpenClaw, skip this too."
-echo "      OpenClaw already handles Telegram — no separate bot needed."
-echo "      Only needed if you want a dedicated Telegram bot of your own"
-echo "      running independently of OpenClaw."
+echo "4️⃣  Telegram Bot"
+echo "   ℹ️  Not needed if using via OpenClaw — skip this."
+echo "      Only required for a dedicated standalone Telegram bot."
 echo ""
 read -rp "  Set up standalone Telegram bot? [y/N]: " setup_tg
 if [[ "${setup_tg,,}" == "y" ]]; then
-    echo "   → Telegram: message @BotFather → /newbot → copy token"
+    echo "   → Message @BotFather on Telegram: /newbot → copy token"
     echo "   → Your Telegram user ID: message @userinfobot"
     echo ""
-    TG_TOKEN="$(prompt_key "TELEGRAM_BOT_TOKEN" "Bot Token")"
-    TG_UID="$(prompt_key "TELEGRAM_USER_ID" "Your Telegram User ID")"
+    TG_TOKEN="$(prompt_key "Bot Token")"
+    TG_UID="$(prompt_key "Your Telegram User ID")"
     set_env "TELEGRAM_BOT_TOKEN" "$TG_TOKEN"
     set_env "TELEGRAM_USER_ID" "$TG_UID"
 else
-    echo "   ⏭️  Skipped — OpenClaw handles Telegram natively."
+    echo "   ⏭️  Skipped."
 fi
-
-# ── Language ──────────────────────────────────────────────────────────────────
-echo ""
-read -rp "4️⃣  Preferred language [en/nl] (default: en): " lang_choice
-lang_choice="${lang_choice:-en}"
-[[ "$lang_choice" != "nl" ]] && lang_choice="en"
-set_env "LANGUAGE" "$lang_choice"
-
-# ── Risk profile ──────────────────────────────────────────────────────────────
-echo ""
-read -rp "5️⃣  Risk profile [conservative/moderate/aggressive] (default: moderate): " risk_choice
-risk_choice="${risk_choice:-moderate}"
-set_env "RISK_PROFILE" "$risk_choice"
-
-# ── Monthly DCA budget ────────────────────────────────────────────────────────
-echo ""
-read -rp "6️⃣  Monthly DCA budget in USD (default: 500): " budget_choice
-budget_choice="${budget_choice:-500}"
-set_env "DCA_BUDGET_MONTHLY" "$budget_choice"
-
-# ── Data dir ─────────────────────────────────────────────────────────────────
-mkdir -p "$INSTALL_DIR/data"
 
 # ── Verify Binance connectivity ───────────────────────────────────────────────
 echo ""
 echo "🔍 Verifying Binance connection..."
-if python3 - <<PYEOF 2>/dev/null
-import sys, os
-sys.path.insert(0, "$INSTALL_DIR")
-from dotenv import load_dotenv
-load_dotenv("$ENV_FILE")
-from binance.spot import Spot
-client = Spot(os.getenv("BINANCE_API_KEY"), os.getenv("BINANCE_API_SECRET"))
-client.account()
-print("ok")
-PYEOF
-then
-    echo "✅ Binance API connected successfully"
-else
-    echo "⚠️  Could not verify Binance API (check your keys or network)"
-fi
-
-# ── Verify Anthropic connectivity ────────────────────────────────────────────
-echo ""
-echo "🔍 Verifying Anthropic connection..."
-if python3 - <<PYEOF 2>/dev/null
+cd "$INSTALL_DIR"
+python3 -c "
+from dotenv import load_dotenv; load_dotenv()
 import os
-from dotenv import load_dotenv
-load_dotenv("$ENV_FILE")
-import anthropic
-client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY",""))
-client.models.list()
-print("ok")
-PYEOF
-then
-    echo "✅ Anthropic API connected successfully"
-else
-    echo "⚠️  Could not verify Anthropic API (check your key)"
-fi
+from binance.spot import Spot
+try:
+    c = Spot(os.getenv('BINANCE_API_KEY'), os.getenv('BINANCE_API_SECRET'))
+    c.account_status()
+    print('✅ Binance connection successful')
+except Exception as e:
+    print(f'⚠️  Binance check failed: {e}')
+    print('   Check your API key and permissions.')
+" 2>/dev/null || echo "⚠️  Could not verify — check your keys if commands fail."
 
 # ── Done ──────────────────────────────────────────────────────────────────────
 echo ""
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "✅  BinanceCoach setup complete!"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "✅ BinanceCoach setup complete!"
 echo ""
-echo "   Try it now:"
-echo "   • Portfolio analysis:    scripts/bc.sh portfolio"
-echo "   • DCA recommendations:   scripts/bc.sh dca"
-echo "   • AI coaching:           scripts/bc.sh coach"
-echo "   • Demo (no keys):        scripts/bc.sh demo"
-if [[ "${setup_tg,,}" == "y" ]]; then
-    echo "   • Start Telegram bot:    scripts/bc.sh telegram"
-fi
+echo "   Install path: $INSTALL_DIR"
+echo "   Config:       $ENV_FILE"
 echo ""
+echo "   Try: 'analyze my portfolio' in OpenClaw"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"

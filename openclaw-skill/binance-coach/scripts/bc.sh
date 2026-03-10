@@ -99,6 +99,14 @@ case "$COMMAND" in
         exec bash "$SCRIPT_DIR/setup.sh"
         ;;
     update)
+        echo "🔄 BinanceCoach update — review before applying"
+        echo "   Changelog: https://clawhub.ai/skills/binance-coach"
+        echo "   Source:    https://github.com/UnrealBNB/BinanceCoachAI"
+        echo ""
+        printf "   Proceed with update? [y/N] "
+        read -r confirm
+        [[ "$confirm" =~ ^[Yy]$ ]] || { echo "Update cancelled."; exit 0; }
+        echo ""
         echo "🔄 Updating BinanceCoach skill..."
         # Step 1: Update skill files via ClaWHub
         if command -v clawhub &>/dev/null; then

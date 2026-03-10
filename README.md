@@ -2,7 +2,78 @@
 
 > *Stop trading on emotion. Start trading with intelligence.*
 
-BinanceCoach is an AI assistant that connects to your Binance account (read-only), analyzes your trading behavior, and coaches you toward better financial decisions. It combines behavioral finance, real-time market data, and systematic DCA strategies to help you trade smarter — not harder.
+BinanceCoach is an AI assistant that connects to your Binance account (read-only), analyzes your trading behavior, and coaches you toward better financial decisions. It combines behavioral finance, real-time market data, and smart DCA strategies — powered by Claude (Anthropic).
+
+**Built for the [OpenClaw AI Assistant Build Campaign 2026](https://binance.com/en/survey/c707e12435d44eaba19cdbc6bbe6f21d).**
+
+---
+
+## 🚀 Two Ways to Use BinanceCoach
+
+### Option 1 — OpenClaw Skill (Recommended)
+
+BinanceCoach is published on [ClaWHub](https://clawhub.com/skills/binance-coach) as a native OpenClaw skill. Once installed, your OpenClaw assistant handles everything — no commands, just natural conversation.
+
+#### Install
+
+```bash
+clawhub install binance-coach
+```
+
+#### First-time setup
+
+After installation, tell your OpenClaw assistant to set it up:
+
+> *"Set up BinanceCoach"*
+
+OpenClaw will run the setup script automatically, which:
+1. **Clones** `UnrealBNB/BinanceCoachAI` from GitHub
+2. **Installs** all Python dependencies
+3. **Asks you interactively** for your API keys:
+   - Binance API key + secret (read-only)
+   - Anthropic API key (for Claude AI coaching)
+   - Telegram bot token + your user ID (optional)
+   - Language preference (English or Dutch)
+   - Risk profile (conservative / moderate / aggressive)
+   - Monthly DCA budget
+4. **Writes everything to `.env`** — no manual file editing
+5. **Verifies** Binance and Anthropic connectivity
+
+#### Use it
+
+Just talk naturally to your OpenClaw assistant:
+
+> *"Analyze my crypto portfolio"*  
+> *"What should I DCA into this week?"*  
+> *"Is my trading behavior healthy?"*  
+> *"Should I sell all my DOGE?"* ← Claude already has your live portfolio loaded  
+> *"Explain what RSI oversold means"*  
+> *"Set an alert for BTC below $60,000"*
+
+No slash commands. No separate app. OpenClaw loads the skill and runs it.
+
+---
+
+### Option 2 — Standalone (CLI + Telegram Bot)
+
+Run BinanceCoach directly as a CLI tool or Telegram bot.
+
+#### Quick install
+
+```bash
+git clone https://github.com/UnrealBNB/BinanceCoachAI.git
+cd BinanceCoachAI
+pip install -r requirements.txt
+cp config.example.env .env
+# Edit .env with your API keys
+python main.py
+```
+
+#### Or use the setup script (handles everything interactively)
+
+```bash
+bash openclaw-skill/binance-coach/scripts/setup.sh
+```
 
 ---
 
@@ -26,19 +97,24 @@ Analyzes your last 30 days of trades and detects:
 
 | Metric | What it detects |
 |--------|----------------|
-| **FOMO Score** (0-100) | Are you buying during extreme greed? Clustering rapid buys near highs? |
+| **FOMO Score** (0-100) | Buying during extreme greed? Clustering rapid buys near highs? |
 | **Overtrading Index** | Trades per week — high frequency typically leads to worse returns |
 | **Panic Sell Detector** | Did you sell at a loss, and the price recovered 15%+ since? |
-| **Streak Tracker** | Gamified: days without panic sell, weeks of consistent DCA |
+| **Streak Tracker** | Days without panic sell, weeks of consistent DCA |
 
 ### 📐 Smart DCA Advisor
-Suggests weekly buy amounts based on a **25-combination matrix** of:
-- RSI zone (oversold / neutral-low / neutral / neutral-high / overbought)
-- Fear & Greed zone (extreme fear / fear / neutral / greed / extreme greed)
+Suggests weekly buy amounts based on a **25-combination matrix** of RSI × Fear & Greed:
 
-Example: If RSI is oversold AND Fear & Greed shows Extreme Fear → **2.0× your base DCA** (best buying opportunity). If overbought AND Extreme Greed → **0.2× base** (don't chase tops).
+| RSI Zone | Extreme Fear | Fear | Neutral | Greed | Extreme Greed |
+|----------|-------------|------|---------|-------|---------------|
+| Oversold | **2.0×** | 1.8× | 1.4× | 1.2× | 1.0× |
+| Neutral-Low | 1.7× | 1.5× | 1.0× | 0.8× | 0.5× |
+| Neutral | 1.3× | 1.1× | 1.0× | 0.8× | 0.3× |
+| Neutral-High | 1.0× | 0.8× | 0.8× | 0.6× | 0.25× |
+| Overbought | 0.6× | 0.5× | 0.4× | 0.4× | **0.2×** |
 
-Adjusts further based on your **risk profile**: conservative (0.7×), moderate (1.0×), aggressive (1.3×).
+RSI oversold + Extreme Fear → **2.0× your base DCA** (best buying opportunity).  
+Overbought + Extreme Greed → **0.2× base** (don't chase tops).
 
 ### 💼 Portfolio Health Score (0–100)
 Grades your portfolio across 5 dimensions:
@@ -51,11 +127,26 @@ Grades your portfolio across 5 dimensions:
 | Chain diversification | 15 | BNB chain exposure vs. multi-chain |
 | Dust cleanup | 10 | Number of sub-$5 positions |
 
+### 🤖 AI Coaching via Claude (Anthropic)
+
+All AI commands automatically load your **live portfolio data** — Claude never asks "what's your portfolio?" because it already knows:
+
+- **Current holdings** with USD values and percentages
+- **Market data** for every coin mentioned in your question (RSI, trend, vs SMA200)
+- **Behavioral analysis** — your FOMO score, overtrading index, panic sell history
+- **Fear & Greed index**
+
+| Command | What Claude does |
+|---------|-----------------|
+| `coach` | Full personalized coaching summary of your portfolio |
+| `weekly` | Weekly behavior brief + action plan |
+| `ask "question"` | Free-form Q&A with full portfolio context pre-loaded |
+
 ### 🔔 Context-Rich Price Alerts
-Set alerts that don't just say "price hit X" — they explain **why it matters**:
+Alerts that explain *why it matters*, not just that a price was hit:
 
 ```
-📉 BTCUSDT Alert Triggered!
+🔔 BTCUSDT Alert Triggered
 
 Price hit $45,000 (your target: $45,000)
 
@@ -66,325 +157,201 @@ Price hit $45,000 (your target: $45,000)
 • vs 200-day SMA: -22.3%
 
 🧠 What this means:
-• Dropped to your target and RSI is oversold — this could be a buying opportunity 💎
-• Extreme fear in the market — historically these are good accumulation zones
-• ⚠️ Below 200-day SMA — long-term trend is bearish, size positions carefully
+• RSI oversold — potential buying opportunity 💎
+• Extreme fear — historically good accumulation zone
+• ⚠️ Below 200-day SMA — size positions carefully
 ```
 
-Supported alert types:
-- `above` — price crosses above a level
-- `below` — price drops below a level
-- `rsi_above` — RSI crosses above a value (e.g. overbought trigger)
-- `rsi_below` — RSI drops below a value (e.g. oversold entry signal)
+Alert types: `above`, `below`, `rsi_above`, `rsi_below`
 
-### 📚 Contextual Education
-Explains concepts in plain language, triggered by what's happening in your portfolio:
+### 📚 Educational Lessons (EN + NL)
+7 built-in lessons: RSI oversold/overbought, Fear & Greed index, DCA, SMA200, concentration risk, panic selling.
 
-- RSI oversold/overbought explained
-- Fear & Greed index — how to use it
-- Dollar Cost Averaging — why and how
-- The 200-day moving average — what institutions watch
-- Concentration risk — why diversification matters
-- Panic selling — the psychology and how to stop
+### 🌐 Bilingual: English & Dutch
+All output, AI prompts, lessons, and Telegram messages available in English and Dutch.  
+Switch: `LANGUAGE=nl` in `.env`, or `/lang` in Telegram, or `lang nl` in CLI.
 
 ---
 
 ## 🏗️ Project Structure
 
 ```
-binance-coach/
-├── main.py                    # Entry point (CLI + Telegram bot)
-├── requirements.txt           # Python dependencies
-├── .env                       # Your API keys (never commit this!)
-├── .gitignore                 # Excludes .env and data/ from git
-├── config.example.env         # Template for .env
+BinanceCoachAI/
+├── main.py                        # Entry point (CLI + Telegram bot + demo)
+├── requirements.txt
+├── config.example.env             # .env template
+├── .gitignore                     # Excludes .env and data/
 │
 ├── modules/
-│   ├── __init__.py
-│   ├── market.py              # Binance market data (price, RSI, SMA, Fear & Greed)
-│   ├── portfolio.py           # Portfolio analysis & health scoring
-│   ├── dca.py                 # Smart DCA advisor (25-combo matrix)
-│   ├── behavior.py            # Behavioral bias detector & coaching
-│   ├── alerts.py              # Context-rich price alert system
-│   └── education.py          # Educational content module
+│   ├── market.py                  # Binance market data (price, RSI, SMA, Fear & Greed)
+│   ├── portfolio.py               # Portfolio analysis & health scoring
+│   ├── dca.py                     # Smart DCA advisor (25-combo RSI × F&G matrix)
+│   ├── behavior.py                # Behavioral bias detector
+│   ├── alerts.py                  # Context-rich price alert system
+│   ├── education.py               # Educational content module
+│   ├── ai_coach.py                # Claude AI coaching engine
+│   ├── i18n.py                    # Translation loader
+│   ├── tg_utils.py                # Telegram HTML formatting helpers
+│   └── locales/
+│       ├── en.py                  # English strings + lessons (179 keys, 7 lessons)
+│       └── nl.py                  # Dutch strings + lessons
 │
 ├── bot/
-│   ├── __init__.py
-│   └── telegram_bot.py        # Telegram bot interface
+│   └── telegram_bot.py            # Telegram bot (17 commands, HTML formatting)
 │
-└── data/                      # SQLite databases (auto-created, gitignored)
-    ├── alerts.db
-    └── behavior.db
+├── openclaw-skill/
+│   └── binance-coach/             # OpenClaw skill (published on ClaWHub)
+│       ├── SKILL.md               # Skill definition — triggers & instructions
+│       ├── scripts/
+│       │   ├── bc.sh              # CLI wrapper (auto-finds project, dispatches commands)
+│       │   └── setup.sh           # Interactive first-time setup
+│       └── references/
+│           ├── commands.md        # Full command reference
+│           └── setup.md           # API key setup guide
+│
+└── data/                          # SQLite databases (auto-created, gitignored)
 ```
 
 ---
 
-## ⚙️ Setup
+## ⚙️ Configuration
 
-### Requirements
-- Python 3.11 or higher
-- A Binance account with a read-only API key
-- (Optional) A Telegram bot token for bot mode
-
-### Step 1 — Clone / download the project
-
-```bash
-cd ~/workspace
-# Already here? You're good.
-cd binance-coach
-```
-
-### Step 2 — Install dependencies
-
-```bash
-pip install -r requirements.txt
-```
-
-### Step 3 — Configure your API keys
-
-Copy the example config and fill it in:
-
-```bash
-cp config.example.env .env
-```
-
-Edit `.env`:
+Copy `config.example.env` to `.env` and fill in your keys:
 
 ```env
-# Required: Binance read-only API key
-BINANCE_API_KEY=your_api_key_here
-BINANCE_API_SECRET=your_api_secret_here
+# ── Binance API (read-only) ────────────────────────────────
+BINANCE_API_KEY=your_read_only_api_key_here
+BINANCE_API_SECRET=your_read_only_api_secret_here
 
-# Optional: Claude AI for enhanced natural language insights
+# ── Anthropic (Claude AI) ──────────────────────────────────
 ANTHROPIC_API_KEY=your_anthropic_key_here
+AI_MODEL=claude-haiku-4-5-20251001   # fast/cheap — or claude-sonnet-4-6 for best quality
 
-# Optional: Telegram bot
+# ── Telegram Bot (optional) ────────────────────────────────
 TELEGRAM_BOT_TOKEN=your_bot_token_here
 TELEGRAM_USER_ID=your_telegram_user_id_here
 
-# Your preferences
+# ── Preferences ────────────────────────────────────────────
+LANGUAGE=en                    # en or nl
 RISK_PROFILE=moderate          # conservative / moderate / aggressive
-FIAT_CURRENCY=EUR
-DCA_BUDGET_MONTHLY=500         # Your monthly DCA budget in FIAT_CURRENCY
+DCA_BUDGET_MONTHLY=500         # Monthly budget in USD
 ```
 
-### Step 4 — Create a Binance read-only API key
+### Creating a Binance read-only API key
 
-1. Log in to [Binance](https://www.binance.com)
-2. Go to **Account → API Management**
-3. Click **Create API** → choose **System Generated**
-4. Give it a name like `BinanceCoach`
-5. Under **API restrictions**, enable only:
-   - ✅ Enable Reading
-   - ❌ Enable Spot & Margin Trading ← **leave OFF**
-   - ❌ Enable Withdrawals ← **leave OFF**
-6. Copy both the **API Key** and **Secret Key** into your `.env`
+1. Binance → **Account → API Management → Create API**
+2. Enable only: ✅ **Enable Reading** — nothing else
+3. Copy key + secret into `.env`
 
-> ⚠️ **Security note:** Never share your API key publicly or commit your `.env` file. The `.gitignore` already excludes it. If you accidentally share it, go to Binance API Management and delete/regenerate it immediately.
+> ⚠️ Never commit `.env`. It's excluded by `.gitignore`. If you accidentally share your key, delete it immediately in Binance API Management.
 
 ---
 
-## 🚀 Running BinanceCoach
-
-### Demo Mode (no API key needed)
-Shows what the tool can do using only public Binance data:
+## 🖥️ CLI Usage
 
 ```bash
-python main.py --demo
+python main.py          # Interactive CLI
+python main.py --demo   # Demo (no API key needed — public market data only)
 ```
-
-Output includes:
-- Live BTC/ETH/BNB market overview (RSI, trend, SMA200)
-- Current Fear & Greed index
-- Smart DCA recommendations for 3 coins
-- 12-month DCA projection
-
-### Interactive CLI Mode
-
-```bash
-python main.py
-```
-
-You'll get a `coach>` prompt. Available commands:
 
 | Command | Description |
 |---------|-------------|
-| `portfolio` | Portfolio health score + breakdown |
-| `dca` | DCA recommendations for BTC/ETH/BNB |
-| `dca SOLUSDT DOTUSDT` | DCA for specific coins |
-| `market BTCUSDT` | Full market context for a coin |
-| `behavior` | Behavioral bias analysis |
-| `alert BTCUSDT below 45000` | Set a price alert |
-| `alert BTCUSDT rsi_below 30` | Alert when RSI is oversold |
-| `alerts` | List all active alerts |
+| `portfolio` | Health score, holdings, suggestions |
+| `dca [SYMBOLS]` | Smart DCA recommendations |
+| `market BTCUSDT` | Price, RSI, trend, SMA50/200, Fear & Greed |
+| `fg` | Fear & Greed index |
+| `behavior` | FOMO score, overtrading, panic sells, streaks |
+| `alert BTCUSDT below 45000` | Set price alert |
+| `alert BTCUSDT rsi_below 30` | Set RSI alert |
+| `alerts` | List active alerts |
 | `check-alerts` | Manually check if any alerts triggered |
-| `learn` | List all educational topics |
+| `learn` | List all 7 lessons |
 | `learn dca` | Read a specific lesson |
-| `learn rsi_oversold` | Learn about RSI oversold signals |
-| `fg` | Current Fear & Greed index |
 | `project BTCUSDT` | 12-month DCA projection |
+| `coach` | AI coaching summary (Claude) |
+| `weekly` | AI weekly brief (Claude) |
+| `ask "question"` | Ask Claude anything — full portfolio context pre-loaded |
+| `models` | List available Claude models |
+| `model claude-sonnet-4-6` | Switch Claude model |
+| `lang nl` | Switch language |
 | `quit` | Exit |
 
-### Telegram Bot Mode
+---
 
-#### Setup
-1. Open Telegram and message [@BotFather](https://t.me/BotFather)
-2. Send `/newbot` and follow the prompts
-3. Copy the token into `.env` as `TELEGRAM_BOT_TOKEN`
-4. Get your Telegram user ID: message [@userinfobot](https://t.me/userinfobot)
-5. Put your ID in `.env` as `TELEGRAM_USER_ID`
-
-#### Run the bot
+## 🤖 Telegram Bot
 
 ```bash
 python main.py --telegram
 ```
 
-#### Bot Commands
+All 17 commands registered with Telegram (shows in autocomplete):
 
 | Command | Description |
 |---------|-------------|
-| `/start` | Show help menu |
-| `/portfolio` | Portfolio health score |
-| `/dca` | DCA recommendations (BTC/ETH/BNB) |
-| `/dca SOLUSDT DOTUSDT` | DCA for specific coins |
-| `/alert BTCUSDT above 70000` | Set price alert |
-| `/alert BTCUSDT rsi_below 30` | Set RSI alert |
-| `/alerts` | List active alerts |
-| `/behavior` | Behavioral analysis |
-| `/learn` | List lessons |
-| `/learn dca` | Read a lesson |
+| `/start` | Help menu |
+| `/portfolio` | Portfolio health analysis |
+| `/dca [SYMBOLS]` | Smart DCA recommendations |
+| `/market [SYMBOL]` | Market context |
 | `/fg` | Fear & Greed index |
+| `/alert SYMBOL COND VALUE` | Set price/RSI alert |
+| `/alerts` | List active alerts |
+| `/checkalerts` | Check triggered alerts |
+| `/behavior` | Behavioral analysis |
+| `/project [SYMBOL]` | 12-month DCA projection |
+| `/learn [TOPIC]` | Educational lessons |
+| `/coach` | 🤖 AI coaching summary |
+| `/weekly` | 🤖 AI weekly brief |
+| `/ask <question>` | 🤖 Ask Claude anything |
+| `/models` | 🤖 List Claude models |
+| `/model <id>` | 🤖 Switch Claude model |
+| `/lang` | 🌐 Choose language (inline buttons) |
 
----
-
-## 📊 How the Smart DCA Matrix Works
-
-BinanceCoach calculates your suggested weekly buy amount using:
-
-```
-suggested_weekly = base_weekly × rsi_fg_multiplier × risk_modifier
-```
-
-Where:
-- `base_weekly = monthly_budget / 4`
-- `rsi_fg_multiplier` is looked up from the 25-combination matrix below
-- `risk_modifier` = 0.7 (conservative) / 1.0 (moderate) / 1.3 (aggressive)
-
-**Multiplier matrix:**
-
-| RSI Zone | Extreme Fear | Fear | Neutral | Greed | Extreme Greed |
-|----------|-------------|------|---------|-------|---------------|
-| Oversold | **2.0×** | 1.8× | 1.4× | 1.2× | 1.0× |
-| Neutral-Low | 1.7× | 1.5× | 1.0× | 0.8× | 0.5× |
-| Neutral | 1.3× | 1.1× | 1.0× | 0.8× | 0.3× |
-| Neutral-High | 1.0× | 0.8× | 0.8× | 0.6× | 0.25× |
-| Overbought | 0.6× | 0.5× | 0.4× | 0.4× | **0.2×** |
-
-**Example** (€500/month budget, moderate profile, BTCUSDT):
-- Base weekly: €500 / 4 = **€125**
-- RSI = 28 (oversold) + Fear & Greed = 19 (extreme fear) → **2.0× multiplier**
-- Risk modifier: 1.0 (moderate)
-- **Suggested this week: €250** → accumulate aggressively at the bottom
+All messages use Telegram HTML formatting — no Markdown rendering issues.
 
 ---
 
 ## 🔐 Security
 
-| What | How it's handled |
-|------|-----------------|
+| What | How |
+|------|-----|
 | API keys | Stored locally in `.env`, never transmitted |
-| API permissions | Read-only by default — no trade or withdraw access |
+| Binance permissions | Read-only — no trading, no withdrawals |
 | Trade history | Stored locally in SQLite (`data/`) — never leaves your machine |
-| `.env` in git | Excluded via `.gitignore` |
-
-**If you accidentally commit your `.env` or share your API key:**
-1. Go to Binance → Account → API Management
-2. Delete the compromised key immediately
-3. Create a new one
-4. Update your `.env`
+| Telegram bot | Single-user restriction via `TELEGRAM_USER_ID` — others get ⛔ |
+| `.env` | Excluded from git via `.gitignore` |
 
 ---
 
 ## 📦 Dependencies
 
-| Package | Version | Purpose |
-|---------|---------|---------|
-| `binance-connector` | ≥3.7.0 | Official Binance REST API SDK |
-| `pandas` | ≥2.0.0 | Data analysis (klines, RSI calculation) |
-| `numpy` | ≥1.24.0 | Numerical calculations |
-| `anthropic` | ≥0.20.0 | Claude AI for natural language insights |
-| `python-telegram-bot` | ≥20.0 | Telegram bot interface |
-| `python-dotenv` | ≥1.0.0 | Load `.env` config |
-| `rich` | ≥13.0.0 | Beautiful terminal output |
-| `requests` | ≥2.31.0 | Fear & Greed index API |
-| `aiohttp` | ≥3.9.0 | Async HTTP for bot mode |
-
----
-
-## 🧪 Testing
-
-### Run demo (no API key):
-```bash
-python main.py --demo
-```
-
-### Quick market check:
-```bash
-python -c "
-from dotenv import load_dotenv; load_dotenv()
-import os
-from binance.spot import Spot
-from modules.market import MarketData
-client = Spot(os.getenv('BINANCE_API_KEY'), os.getenv('BINANCE_API_SECRET'))
-market = MarketData(client)
-ctx = market.get_market_context('BTCUSDT')
-print(f'BTC: \${ctx[\"price\"]:,.2f} | RSI: {ctx[\"rsi\"]} | F&G: {ctx[\"fear_greed\"][\"value\"]}')
-"
-```
-
-### Verify API key works:
-```bash
-python -c "
-from dotenv import load_dotenv; load_dotenv()
-import os
-from binance.spot import Spot
-client = Spot(os.getenv('BINANCE_API_KEY'), os.getenv('BINANCE_API_SECRET'))
-info = client.account()
-print('API key working. Total assets:', len([b for b in info['balances'] if float(b['free']) > 0]))
-"
-```
+| Package | Purpose |
+|---------|---------|
+| `binance-connector` | Official Binance REST API SDK |
+| `pandas` | RSI + moving average calculations |
+| `anthropic` | Claude AI coaching |
+| `python-telegram-bot` | Telegram bot interface |
+| `python-dotenv` | Load `.env` config |
+| `rich` | Terminal output formatting |
+| `requests` | Fear & Greed index API |
+| `aiohttp` | Async HTTP for bot mode |
 
 ---
 
 ## ⚠️ Known Limitations
 
-- **No secret key provided yet** — portfolio and trade history commands require both API key + secret. Market data and demo mode work with key only.
-- **Alert polling** — alerts are checked when you run `check-alerts` manually or via the Telegram `/alert` command. Background auto-polling is not yet implemented (planned).
-- **Historical Fear & Greed** — the behavioral FOMO score uses the *current* F&G index as a proxy. Per-trade historical F&G requires a paid data API.
-- **Futures/Margin** — only Spot wallet is analyzed. Futures positions are not included.
-
----
-
-## 🗺️ Roadmap
-
-- [ ] Background alert scheduler (poll every 5 minutes)
-- [ ] Push notifications via Telegram when alert triggers automatically
-- [ ] Historical trade P&L chart
-- [ ] AI-generated weekly coaching summary (Claude)
-- [ ] Web dashboard (FastAPI + simple HTML)
-- [ ] Futures/Margin portfolio support
-- [ ] Multi-account support
+- **Spot only** — Futures and Margin positions are not included
+- **Alert polling** — Alerts are checked manually (`check-alerts`) or via `/checkalerts`. Background auto-polling is not yet implemented
+- **Historical Fear & Greed** — The FOMO score uses the current F&G index as a proxy. Per-trade historical F&G requires a paid data provider
 
 ---
 
 ## 🏆 Competition Entry
 
-Built for the **OpenClaw AI Assistant Build Campaign 2026** — deadline March 18, 2026.
+Built for the **[OpenClaw AI Assistant Build Campaign 2026](https://binance.com/en/survey/c707e12435d44eaba19cdbc6bbe6f21d)** by [@UnrealBNB](https://twitter.com/UnrealBNB).
 
-**Category:** Portfolio / DCA / Behavioral coaching tool  
-**Unique angle:** Behavioral finance meets crypto. Most tools tell you *what* the price is. BinanceCoach tells you *what you're doing wrong* and how to fix it.  
-**Social impact:** The #1 reason retail traders lose money isn't lack of information — it's emotional decision-making. This directly solves that.
+**Category:** Trading & Strategy Tools · Asset Management · Education
+
+**Unique angle:** Most crypto tools tell you *what* the price is. BinanceCoach tells you *what you're doing wrong behaviorally* and how to fix it — backed by real analysis of your actual trade history, not generic advice.
 
 ---
 

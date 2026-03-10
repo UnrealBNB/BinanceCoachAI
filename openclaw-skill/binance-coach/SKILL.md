@@ -40,7 +40,8 @@ metadata:
     "openclaw": {
       "emoji": "📊",
       "homepage": "https://github.com/UnrealBNB/BinanceCoachAI",
-      "requires": { "bins": ["python3", "pip3"] },
+      "requires": { "bins": ["python3", "pip3"], "env": ["BINANCE_API_KEY", "BINANCE_API_SECRET"] },
+      "primaryEnv": "BINANCE_API_KEY",
       "setup": "scripts/setup.sh",
       "bundled": true,
       "security": {

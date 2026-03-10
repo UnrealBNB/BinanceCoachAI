@@ -652,9 +652,49 @@ def build_app(client: Spot, market: MarketData):
 
     app.add_handler(CallbackQueryHandler(lang_callback, pattern=r"^setlang:"))
 
+    # ── Background alert polling ───────────────────────────────────────────
+    ALERT_POLL_INTERVAL = 300  # seconds (5 minutes)
+    authorized_uid = int(os.getenv("TELEGRAM_USER_ID", "0"))
+
+    async def poll_alerts(context) -> None:
+        """Background job: check alerts every 5 min, push notification if triggered."""
+        try:
+            fired = alert_mgr.check_alerts()
+            if not fired:
+                return
+            for f in fired:
+                raw = f.get("context", "")
+                # Convert any leftover Markdown to HTML
+                html = md_to_html(raw) if raw else (
+                    f"<b>🔔 {e(f['symbol'])} Alert Triggered!</b>\n"
+                    f"Condition: <code>{e(f['condition'])} {f['threshold']}</code>"
+                )
+                try:
+                    await context.bot.send_message(
+                        chat_id=authorized_uid,
+                        text=html,
+                        parse_mode=HTML,
+                    )
+                    logger.info("Alert notification sent for %s", f["symbol"])
+                except Exception as send_err:
+                    logger.warning("Failed to send alert notification: %s", send_err)
+        except Exception as exc:
+            logger.warning("Alert poll error: %s", exc)
+
     async def post_init(application: Application):
         await application.bot.set_my_commands(BOT_COMMANDS)
         logger.info("Bot commands registered with Telegram")
+
+        if authorized_uid:
+            application.job_queue.run_repeating(
+                poll_alerts,
+                interval=ALERT_POLL_INTERVAL,
+                first=60,  # first check after 1 minute
+                name="alert_poller",
+            )
+            logger.info("Alert poller started — checking every %ds", ALERT_POLL_INTERVAL)
+        else:
+            logger.warning("TELEGRAM_USER_ID not set — alert polling disabled")
 
     app.post_init = post_init
 

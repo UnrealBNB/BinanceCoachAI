@@ -176,11 +176,37 @@ def run_cli():
                 console.print(f"[red]Error: {e}[/red]")
 
         elif parts[0] == "dca":
-            symbols = [s.upper() for s in parts[1:]] if len(parts) > 1 else ["BTCUSDT", "ETHUSDT", "BNBUSDT"]
+            if len(parts) > 1:
+                symbols = [s.upper() for s in parts[1:]]
+            else:
+                # FIX 5: Auto-detect from portfolio holdings
+                try:
+                    _bals = portfolio.get_balances()
+                    symbols = [
+                        b["asset"] + "USDT"
+                        for b in _bals
+                        if not b["is_stable"] and b["usd_value"] > 10
+                    ]
+                    valid = []
+                    for sym in symbols[:6]:
+                        try:
+                            market.get_price(sym)
+                            valid.append(sym)
+                        except Exception:
+                            pass
+                    symbols = valid if valid else ["BTCUSDT", "ETHUSDT", "BNBUSDT"]
+                except Exception:
+                    symbols = ["BTCUSDT", "ETHUSDT", "BNBUSDT"]
             dca.print_recommendations(symbols)
 
         elif parts[0] == "behavior":
-            behavior.print_behavior_report()
+            # FIX 1: Sync trades from portfolio before analysis
+            try:
+                _bals = portfolio.get_balances()
+                _syms = [b["asset"] + "USDT" for b in _bals if not b["is_stable"] and b["usd_value"] > 5]
+            except Exception:
+                _syms = []
+            behavior.print_behavior_report(symbols=_syms)
 
         elif parts[0] == "alert" and len(parts) >= 4:
             symbol, condition, threshold = parts[1].upper(), parts[2], float(parts[3])
@@ -228,15 +254,21 @@ def run_cli():
             console.print(f"{emoji} Fear & Greed: [bold]{val}/100[/bold] — {fg['classification']}")
 
         elif parts[0] == "project":
+            # FIX 7: Show 3 scenarios with per-asset growth rates
             symbol = parts[1].upper() if len(parts) > 1 else "BTCUSDT"
             proj = dca.project_accumulation(symbol)
-            console.print(f"""
-[bold]{symbol} — 12-Month DCA Projection[/bold]
-Total invested:     ${proj['total_invested']:,.2f}
-Projected value:    ${proj['projected_value']:,.2f}
-Projected ROI:      +{proj['roi_pct']}%
-Note: {proj['note']}
-""")
+            sc = proj.get("scenarios", {})
+            bear = sc.get("bear", {})
+            base = sc.get("base", {})
+            bull = sc.get("bull", {})
+            console.print(Panel(
+                f"[dim]Asset growth assumption: {proj['monthly_growth_assumed']}%/month[/dim]\n\n"
+                f"[red]🐻 Bear  ({bear.get('monthly_growth_pct', 0)}%/mo):[/red]  invest ${bear.get('total_invested', 0):,.0f} → ${bear.get('projected_value', 0):,.0f}  ({bear.get('roi_pct', 0):+.1f}%)\n"
+                f"[yellow]📊 Base  ({base.get('monthly_growth_pct', 0)}%/mo):[/yellow] invest ${base.get('total_invested', 0):,.0f} → ${base.get('projected_value', 0):,.0f}  ({base.get('roi_pct', 0):+.1f}%)\n"
+                f"[green]🐂 Bull  ({bull.get('monthly_growth_pct', 0)}%/mo):[/green]  invest ${bull.get('total_invested', 0):,.0f} → ${bull.get('projected_value', 0):,.0f}  ({bull.get('roi_pct', 0):+.1f}%)\n\n"
+                f"[dim]{proj['note']}[/dim]",
+                title=f"📅 {symbol} — 12-Month DCA Projection", border_style="green"
+            ))
 
         # ── AI commands ───────────────────────────────────────────────────
         elif parts[0] == "models":
@@ -469,8 +501,28 @@ def _dispatch_command(cmd_str, client, market, portfolio, dca, alert_mgr, behavi
                 console.print(f"[red]❌ Portfolio error: {e}[/red]")
 
     elif parts[0] == "dca":
-        symbols = [s.upper() for s in parts[1:]] if len(parts) > 1 else ["BTCUSDT", "ETHUSDT", "BNBUSDT"]
-        console.print(f"\n[dim]{t('cli.fetching_dca', symbols=', '.join(symbols))}[/dim]")
+        if len(parts) > 1:
+            symbols = [s.upper() for s in parts[1:]]
+        else:
+            # FIX 5: Auto-detect from portfolio holdings
+            try:
+                _bals = portfolio.get_balances()
+                symbols = [
+                    b["asset"] + "USDT"
+                    for b in _bals
+                    if not b["is_stable"] and b["usd_value"] > 10
+                ]
+                valid = []
+                for sym in symbols[:6]:  # Max 6 coins
+                    try:
+                        market.get_price(sym)
+                        valid.append(sym)
+                    except Exception:
+                        pass
+                symbols = valid if valid else ["BTCUSDT", "ETHUSDT", "BNBUSDT"]
+            except Exception:
+                symbols = ["BTCUSDT", "ETHUSDT", "BNBUSDT"]
+        console.print(f"\n[dim]📐 Getting DCA recommendations for {', '.join(symbols)}...[/dim]")
         dca.print_recommendations(symbols)
 
     elif parts[0] == "market":
@@ -504,7 +556,13 @@ def _dispatch_command(cmd_str, client, market, portfolio, dca, alert_mgr, behavi
         ))
 
     elif parts[0] == "behavior":
-        behavior.print_behavior_report()
+        # FIX 1: Sync trades from portfolio before analysis
+        try:
+            _bals = portfolio.get_balances()
+            _syms = [b["asset"] + "USDT" for b in _bals if not b["is_stable"] and b["usd_value"] > 5]
+        except Exception:
+            _syms = []
+        behavior.print_behavior_report(symbols=_syms)
 
     elif parts[0] == "alert":
         if len(parts) < 4:
@@ -533,14 +591,20 @@ def _dispatch_command(cmd_str, client, market, portfolio, dca, alert_mgr, behavi
             edu.explain(topic)
 
     elif parts[0] == "project":
+        # FIX 7: Show 3 scenarios (bear/base/bull) with per-asset growth rates
         symbol = parts[1].upper() if len(parts) > 1 else "BTCUSDT"
         proj = dca.project_accumulation(symbol, months=12)
+        sc = proj.get("scenarios", {})
+        bear = sc.get("bear", {})
+        base = sc.get("base", {})
+        bull = sc.get("bull", {})
         console.print(Panel(
-            f"{t('dca.projection.invested')}: [bold]${proj['total_invested']:,.2f}[/bold]\n"
-            f"{t('dca.projection.value')}: [bold]${proj['projected_value']:,.2f}[/bold]\n"
-            f"{t('dca.projection.roi')}: [bold]+{proj['roi_pct']}%[/bold]\n\n"
+            f"[dim]Asset growth assumption: {proj['monthly_growth_assumed']}%/month[/dim]\n\n"
+            f"[red]🐻 Bear  ({bear.get('monthly_growth_pct', 0)}%/mo):[/red]  invest ${bear.get('total_invested', 0):,.0f} → ${bear.get('projected_value', 0):,.0f}  ({bear.get('roi_pct', 0):+.1f}%)\n"
+            f"[yellow]📊 Base  ({base.get('monthly_growth_pct', 0)}%/mo):[/yellow] invest ${base.get('total_invested', 0):,.0f} → ${base.get('projected_value', 0):,.0f}  ({base.get('roi_pct', 0):+.1f}%)\n"
+            f"[green]🐂 Bull  ({bull.get('monthly_growth_pct', 0)}%/mo):[/green]  invest ${bull.get('total_invested', 0):,.0f} → ${bull.get('projected_value', 0):,.0f}  ({bull.get('roi_pct', 0):+.1f}%)\n\n"
             f"[dim]{proj['note']}[/dim]",
-            title=t("dca.projection.title", symbol=symbol, months=12), border_style="green"
+            title=f"📅 {symbol} — 12-Month DCA Projection", border_style="green"
         ))
 
     elif parts[0] in ("coach", "weekly", "ask", "models", "model") and ai:

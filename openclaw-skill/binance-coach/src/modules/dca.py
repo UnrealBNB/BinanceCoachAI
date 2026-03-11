@@ -44,6 +44,17 @@ DCA_MULTIPLIERS = {
     ("overbought", "extreme_greed"): 0.2,   # Very reduced; don't chase tops
 }
 
+# FIX 7: Conservative monthly growth assumptions (median historical performance, risk-adjusted)
+ASSET_MONTHLY_GROWTH = {
+    "BTC": 0.040,   "ETH": 0.040,   "BNB": 0.038,
+    "SOL": 0.045,   "ADA": 0.030,   "XRP": 0.030,
+    "DOT": 0.028,   "AVAX": 0.040,  "LINK": 0.038,
+    "MATIC": 0.030, "UNI": 0.030,   "DOGE": 0.025,
+    "SHIB": 0.020,  "FLOKI": 0.018, "ANKR": 0.022,
+    "SCR": 0.020,
+}
+DEFAULT_MONTHLY_GROWTH = 0.030  # Conservative default for unknown assets
+
 
 def classify_fg(value: int) -> str:
     if value <= 20:   return "extreme_fear"
@@ -79,22 +90,49 @@ class DCAAdvisor:
         fg_zone = classify_fg(fg_val)
         fg_label = ctx["fear_greed"]["classification"]
 
-        # Get multiplier
+        # Get matrix multiplier
         key = (rsi_zone, fg_zone)
-        multiplier = DCA_MULTIPLIERS.get(key, 1.0) * self.risk_modifier
+        matrix_mult = DCA_MULTIPLIERS.get(key, 1.0)
+
+        # FIX 2: SMA200 modifier — price relative to 200-day moving average
+        vs_sma200 = ctx["vs_sma200_pct"]
+        if vs_sma200 < -30:
+            sma_modifier = 1.25   # Deep discount — strong accumulation signal
+        elif vs_sma200 < -20:
+            sma_modifier = 1.15   # Good discount
+        elif vs_sma200 < -10:
+            sma_modifier = 1.07   # Slight discount
+        elif vs_sma200 <= 10:
+            sma_modifier = 1.0    # Fair value
+        elif vs_sma200 <= 25:
+            sma_modifier = 0.90   # Slight premium
+        elif vs_sma200 <= 40:
+            sma_modifier = 0.80   # Expensive
+        else:
+            sma_modifier = 0.70   # Very expensive — reduce significantly
+
+        multiplier = matrix_mult * sma_modifier * self.risk_modifier
 
         # Weekly DCA base (monthly / 4)
         weekly_base = self.monthly_budget / 4
-        suggested_weekly = round(weekly_base * multiplier, 2)
+
+        # FIX 3: Hard cap — never more than 50% of monthly budget in one week
+        MAX_WEEKLY = self.monthly_budget * 0.5
+        raw_weekly = round(weekly_base * multiplier, 2)
+        capped = raw_weekly > MAX_WEEKLY
+        suggested_weekly = min(raw_weekly, MAX_WEEKLY)
+        suggested_weekly = round(suggested_weekly, 2)
 
         # Rationale
-        rationale = self._build_rationale(ctx, rsi_zone, fg_zone, fg_val, fg_label, multiplier)
+        rationale = self._build_rationale(
+            ctx, rsi_zone, fg_zone, fg_val, fg_label,
+            multiplier, matrix_mult, sma_modifier, capped, MAX_WEEKLY
+        )
 
         # How much of the asset you'd buy at current price
         coin_amount = suggested_weekly / ctx["price"]
 
         # Discount/premium vs SMA200
-        vs_sma200 = ctx["vs_sma200_pct"]
         direction = t("dca.reason.deep_discount", pct=f"{abs(vs_sma200):.1f}") if vs_sma200 < 0 else t("dca.reason.premium", pct=f"{vs_sma200:.1f}")
         price_note = direction
 
@@ -107,6 +145,7 @@ class DCAAdvisor:
             "fg_value": fg_val,
             "fg_label": fg_label,
             "multiplier": multiplier,
+            "sma_modifier": sma_modifier,
             "base_weekly_usd": weekly_base,
             "suggested_weekly_usd": suggested_weekly,
             "coin_amount": round(coin_amount, 8),
@@ -114,9 +153,11 @@ class DCAAdvisor:
             "price_vs_sma200": vs_sma200,
             "price_note": price_note,
             "trend": ctx["trend"],
+            "capped": capped,
         }
 
-    def _build_rationale(self, ctx, rsi_zone, fg_zone, fg_val, fg_label, multiplier) -> list[str]:
+    def _build_rationale(self, ctx, rsi_zone, fg_zone, fg_val, fg_label, multiplier,
+                         matrix_mult=None, sma_modifier=None, capped=False, max_weekly=None) -> list[str]:
         reasons = []
         rsi = ctx["rsi"]
 
@@ -134,8 +175,16 @@ class DCAAdvisor:
         else:
             reasons.append(t("dca.reason.fg_neutral", fg=fg_val, label=fg_label))
 
+        # FIX 2: Show SMA200 modifier contribution with actual numbers
         vs_sma200 = ctx["vs_sma200_pct"]
-        if vs_sma200 < -20:
+        if sma_modifier is not None and sma_modifier != 1.0:
+            if vs_sma200 < -20:
+                reasons.append(f"📉 SMA200 discount {vs_sma200:+.1f}% → ×{sma_modifier:.2f} boost applied")
+            elif vs_sma200 > 10:
+                reasons.append(f"📈 SMA200 premium {vs_sma200:+.1f}% → ×{sma_modifier:.2f} reduction applied")
+            else:
+                reasons.append(f"📊 SMA200: {vs_sma200:+.1f}% → ×{sma_modifier:.2f} modifier")
+        elif vs_sma200 < -20:
             reasons.append(t("dca.reason.deep_discount", pct=f"{abs(vs_sma200):.1f}"))
         elif vs_sma200 > 30:
             reasons.append(t("dca.reason.premium", pct=f"{vs_sma200:.1f}"))
@@ -144,11 +193,15 @@ class DCAAdvisor:
             reasons.append(t("dca.reason.below_sma50"))
 
         if multiplier > 1.0:
-            reasons.append(t("dca.reason.increase", mult=f"{multiplier:.1f}"))
+            reasons.append(t("dca.reason.increase", mult=f"{multiplier:.2f}"))
         elif multiplier < 1.0:
-            reasons.append(t("dca.reason.reduce", mult=f"{multiplier:.1f}"))
+            reasons.append(t("dca.reason.reduce", mult=f"{multiplier:.2f}"))
         else:
-            reasons.append(t("dca.reason.normal", mult=f"{multiplier:.1f}"))
+            reasons.append(t("dca.reason.normal", mult=f"{multiplier:.2f}"))
+
+        # FIX 3: Note if budget cap was applied
+        if capped and max_weekly is not None:
+            reasons.append(f"⚠️  Weekly cap applied: ${max_weekly:.2f} (50% of monthly budget)")
 
         return reasons
 
@@ -165,9 +218,11 @@ class DCAAdvisor:
         table.add_column(t("dca.col.coins"), style="white")
         table.add_column(t("dca.col.vs_sma200"), style="blue")
 
+        recs = []
         for symbol in symbols:
             rec = self.get_recommendation(symbol)
-            multiplier_str = f"×{rec['multiplier']:.1f}"
+            recs.append(rec)
+            multiplier_str = f"×{rec['multiplier']:.2f}"
             if rec['multiplier'] > 1.3:
                 multiplier_str = f"[green]{multiplier_str}[/green]"
             elif rec['multiplier'] < 0.7:
@@ -175,49 +230,65 @@ class DCAAdvisor:
 
             vs_color = "green" if rec["price_vs_sma200"] < 0 else "red"
             rsi_label = rec.get("rsi_zone_label", rec["rsi_zone"])[:6]
+            weekly_str = f"${rec['suggested_weekly_usd']:,.2f}"
+            if rec.get("capped"):
+                weekly_str += " [dim](capped)[/dim]"
             table.add_row(
                 rec["symbol"],
                 f"${rec['price']:,.4f}",
                 f"{rec['rsi']} ({rsi_label})",
                 f"{rec['fg_value']} ({rec['fg_label'][:4]})",
                 multiplier_str,
-                f"${rec['suggested_weekly_usd']:,.2f}",
+                weekly_str,
                 f"{rec['coin_amount']:.6f}",
                 f"[{vs_color}]{rec['price_vs_sma200']:+.1f}%[/{vs_color}]",
             )
 
         console.print(table)
 
-        # Print rationale for first symbol
-        if symbols:
-            rec = self.get_recommendation(symbols[0])
+        # FIX 5: Print rationale for ALL symbols (compact per coin)
+        for rec in recs:
             console.print(f"\n[bold]{t('dca.why', symbol=rec['symbol'])}[/bold]")
             for r in rec["rationale"]:
                 console.print(f"  {r}")
 
     def project_accumulation(self, symbol: str, months: int = 12) -> dict:
-        """Project portfolio value assuming consistent DCA."""
+        """Project portfolio value assuming consistent DCA. FIX 7: per-asset growth + 3 scenarios."""
         rec = self.get_recommendation(symbol)
         price = rec["price"]
         weekly = rec["suggested_weekly_usd"]
         monthly = weekly * 4.3
 
-        # Assume moderate 5% monthly price growth (conservative)
-        total_coins = 0
-        total_invested = 0
-        for month in range(1, months + 1):
-            projected_price = price * (1.05 ** month)
-            coins_this_month = monthly / projected_price
-            total_coins += coins_this_month
-            total_invested += monthly
+        # FIX 7: Get asset-specific growth rate
+        base_asset = symbol.replace("USDT", "").replace("BUSD", "")
+        base_growth = ASSET_MONTHLY_GROWTH.get(base_asset, DEFAULT_MONTHLY_GROWTH)
 
-        final_price = price * (1.05 ** months)
-        portfolio_value = total_coins * final_price
+        results = {}
+        for scenario, growth in [("bear", base_growth * 0.5), ("base", base_growth), ("bull", base_growth * 2.0)]:
+            total_coins = 0.0
+            total_invested = 0.0
+            for month in range(1, months + 1):
+                projected_price = price * ((1 + growth) ** month)
+                coins_this_month = monthly / projected_price
+                total_coins += coins_this_month
+                total_invested += monthly
+            final_price = price * ((1 + growth) ** months)
+            portfolio_value = total_coins * final_price
+            results[scenario] = {
+                "total_invested": round(total_invested, 2),
+                "projected_value": round(portfolio_value, 2),
+                "roi_pct": round((portfolio_value - total_invested) / total_invested * 100, 1),
+                "monthly_growth_pct": round(growth * 100, 1),
+            }
 
         return {
             "months": months,
-            "total_invested": round(total_invested, 2),
-            "projected_value": round(portfolio_value, 2),
-            "roi_pct": round((portfolio_value - total_invested) / total_invested * 100, 1),
+            "asset": base_asset,
+            "monthly_growth_assumed": round(base_growth * 100, 1),
+            "scenarios": results,
+            # Backward compat keys (base scenario)
+            "total_invested": results["base"]["total_invested"],
+            "projected_value": results["base"]["projected_value"],
+            "roi_pct": results["base"]["roi_pct"],
             "note": t("dca.projection.note"),
         }

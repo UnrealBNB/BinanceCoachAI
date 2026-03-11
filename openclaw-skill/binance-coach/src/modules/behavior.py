@@ -131,8 +131,9 @@ class BehaviorCoach:
 
     def detect_panic_sells(self) -> list[dict]:
         """
-        Detect sells that happened near local price lows
-        (sold low, then price recovered significantly).
+        Detect sells that happened near the 30-day low before the sell
+        AND where price has since recovered >15%.
+        This distinguishes emotional selling at a local bottom from rational profit-taking.
         """
         conn = sqlite3.connect(DB_PATH)
         c = conn.cursor()
@@ -142,17 +143,38 @@ class BehaviorCoach:
         conn.close()
 
         panic_sells = []
-        for symbol, sell_price, sell_time in sells:
+        for symbol, sell_price, sell_time_ms in sells:
             try:
                 current = self.market.get_price(symbol)
                 recovery = ((current - sell_price) / sell_price) * 100
-                if recovery > 15:  # Price is 15%+ higher than where you sold
+                if recovery <= 15:
+                    continue  # Price hasn't recovered meaningfully — not a panic sell signal
+
+                # Check if sell was near the 30-day low before the sell
+                sell_dt = datetime.utcfromtimestamp(sell_time_ms / 1000)
+                start_ms = int((sell_dt - timedelta(days=30)).timestamp() * 1000)
+                raw = self.market.client.klines(
+                    symbol=symbol,
+                    interval="1d",
+                    startTime=start_ms,
+                    endTime=sell_time_ms,
+                    limit=30
+                )
+                if not raw:
+                    continue
+                thirty_day_low = min(float(row[3]) for row in raw)  # row[3] = daily low
+                pct_above_low = ((sell_price - thirty_day_low) / thirty_day_low) * 100
+
+                # Panic sell = sold within 10% of the 30-day low AND price has recovered >15%
+                if pct_above_low <= 10.0:
                     panic_sells.append({
                         "symbol": symbol,
                         "sell_price": sell_price,
                         "current_price": current,
                         "recovery_pct": round(recovery, 1),
-                        "sold_at": datetime.fromtimestamp(sell_time / 1000).strftime("%Y-%m-%d"),
+                        "sold_at": sell_dt.strftime("%Y-%m-%d"),
+                        "thirty_day_low": round(thirty_day_low, 4),
+                        "pct_above_low": round(pct_above_low, 1),
                     })
             except Exception:
                 pass
@@ -200,12 +222,75 @@ class BehaviorCoach:
 
         return streaks
 
-    def print_behavior_report(self):
+    def update_streaks(self, has_panic_sell: bool, has_recent_buy: bool):
+        """Update streak counters. Call once per behavior report."""
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+        today = datetime.utcnow().strftime("%Y-%m-%d")
+
+        # --- No panic sell streak ---
+        c.execute("SELECT count, last_updated FROM streaks WHERE streak_type='no_panic_sell'")
+        row = c.fetchone()
+        if has_panic_sell:
+            if row:
+                c.execute("UPDATE streaks SET count=0, last_updated=? WHERE streak_type='no_panic_sell'", (today,))
+            else:
+                c.execute("INSERT INTO streaks (streak_type, count, start_date, last_updated) VALUES ('no_panic_sell', 0, ?, ?)", (today, today))
+        else:
+            if not row:
+                c.execute("INSERT INTO streaks (streak_type, count, start_date, last_updated) VALUES ('no_panic_sell', 1, ?, ?)", (today, today))
+            elif row[1] and row[1] != today:
+                try:
+                    days = (datetime.strptime(today, "%Y-%m-%d") - datetime.strptime(row[1], "%Y-%m-%d")).days
+                except Exception:
+                    days = 1
+                new_count = row[0] + max(1, days)
+                c.execute("UPDATE streaks SET count=?, last_updated=? WHERE streak_type='no_panic_sell'", (new_count, today))
+
+        # --- DCA consistency streak (weekly) ---
+        c.execute("SELECT count, last_updated FROM streaks WHERE streak_type='dca_consistency'")
+        dca_row = c.fetchone()
+        if has_recent_buy:
+            if not dca_row:
+                c.execute("INSERT INTO streaks (streak_type, count, start_date, last_updated) VALUES ('dca_consistency', 1, ?, ?)", (today, today))
+            elif dca_row[1] and dca_row[1] != today:
+                try:
+                    days = (datetime.strptime(today, "%Y-%m-%d") - datetime.strptime(dca_row[1], "%Y-%m-%d")).days
+                except Exception:
+                    days = 0
+                if days >= 7:
+                    c.execute("UPDATE streaks SET count=?, last_updated=? WHERE streak_type='dca_consistency'", (dca_row[0] + 1, today))
+        else:
+            if dca_row and dca_row[1]:
+                try:
+                    days = (datetime.strptime(today, "%Y-%m-%d") - datetime.strptime(dca_row[1], "%Y-%m-%d")).days
+                    if days >= 14:
+                        c.execute("UPDATE streaks SET count=0, last_updated=? WHERE streak_type='dca_consistency'", (today,))
+                except Exception:
+                    pass
+
+        conn.commit()
+        conn.close()
+
+    def print_behavior_report(self, symbols: list[str] = None):
         """Print a rich behavior analysis panel."""
+        # FIX 1: Sync trades from Binance before reading DB
+        if symbols:
+            self.sync_trades(symbols)
+
         fomo = self.calculate_fomo_score()
         overtrade = self.calculate_overtrading_index()
         panic = self.detect_panic_sells()
-        streaks = self.get_streaks()
+
+        # FIX 6: Update streaks based on current data
+        week_ago = int((datetime.utcnow() - timedelta(days=7)).timestamp() * 1000)
+        conn2 = sqlite3.connect(DB_PATH)
+        c2 = conn2.cursor()
+        c2.execute("SELECT COUNT(*) FROM trades WHERE side='BUY' AND time > ?", (week_ago,))
+        recent_buys = c2.fetchone()[0]
+        conn2.close()
+        self.update_streaks(has_panic_sell=bool(panic), has_recent_buy=recent_buys > 0)
+        streaks = self.get_streaks()  # Get fresh streaks after update
 
         report = f"""
 [bold]🧠 {t('behavior.title')}[/bold]
@@ -225,7 +310,11 @@ class BehaviorCoach:
             for p in panic[:3]:
                 sell_fmt = f"{p['sell_price']:.4f}"
                 now_fmt = f"{p['current_price']:.4f}"
-                report += f"  {t('behavior.panic.found', symbol=p['symbol'], sell=sell_fmt, date=p['sold_at'], now=now_fmt, pct=p['recovery_pct'])}\n"
+                # FIX 4: Show pct_above_low in panic sell output
+                report += (
+                    f"  {t('behavior.panic.found', symbol=p['symbol'], sell=sell_fmt, date=p['sold_at'], now=now_fmt, pct=p['recovery_pct'])}"
+                    f"  [dim](sold {p['pct_above_low']:.1f}% above 30d low)[/dim]\n"
+                )
         else:
             report += f"  {t('behavior.panic.none')}\n"
 

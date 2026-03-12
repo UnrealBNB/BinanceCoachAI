@@ -473,6 +473,14 @@ def run_command(cmd_str: str):
     )
 
 
+def _is_num(s: str) -> bool:
+    try:
+        float(s)
+        return True
+    except (ValueError, TypeError):
+        return False
+
+
 def _dispatch_command(cmd_str, client, market, portfolio, dca, alert_mgr, behavior, edu, ai, console):
     """
     Shared command dispatcher — used by both run_cli() and run_command().
@@ -682,6 +690,83 @@ def _dispatch_command(cmd_str, client, market, portfolio, dca, alert_mgr, behavi
                 for code, label in AVAILABLE_LANGS.items()
             )
             console.print(t("cli.lang_list", langs=lang_list))
+
+    # ── Decision Journal ────────────────────────────────────────────────────
+    elif parts[0] == "journal":
+        from modules.journal import DecisionJournal
+        j = DecisionJournal(market=market)
+        coin_filter = parts[1] if len(parts) > 1 else None
+        j.print_journal(coin=coin_filter)
+
+    elif parts[0] == "journal-add":
+        # journal-add COIN BUY/SELL PRICE [AMOUNT_USD] [notes...]
+        if len(parts) < 4:
+            console.print("[red]Usage: journal-add COIN BUY/SELL PRICE [AMOUNT_USD] [notes...][/red]")
+            console.print("[dim]Example: journal-add ADA buy 0.262 100 \"oversold -49% SMA200\"[/dim]")
+        else:
+            from modules.journal import DecisionJournal
+            j = DecisionJournal(market=market)
+            coin_arg   = parts[1]
+            action_arg = parts[2]
+            price_arg  = float(parts[3])
+            amount_arg = float(parts[4]) if len(parts) > 4 and _is_num(parts[4]) else None
+            notes_start = 5 if amount_arg else 4
+            notes_arg  = " ".join(parts[notes_start:]) if len(parts) > notes_start else ""
+            j.add_entry(coin_arg, action_arg, price_arg, amount_arg, notes_arg)
+
+    elif parts[0] == "journal-perf":
+        from modules.journal import DecisionJournal
+        j = DecisionJournal(market=market)
+        j.print_performance()
+
+    # ── P&L Calculator ──────────────────────────────────────────────────────
+    elif parts[0] == "pnl":
+        from modules.pnl import PnLCalculator
+        pnl = PnLCalculator(client, market, portfolio)
+        symbol_arg = parts[1].upper() if len(parts) > 1 else None
+        pnl.print_pnl(symbol=symbol_arg)
+
+    elif parts[0] == "pnl-export":
+        from modules.pnl import PnLCalculator
+        pnl = PnLCalculator(client, market, portfolio)
+        pnl.export_csv()
+
+    # ── Rebalancing ─────────────────────────────────────────────────────────
+    elif parts[0] == "rebalance":
+        from modules.rebalance import RebalanceAdvisor
+        rb = RebalanceAdvisor(portfolio, market)
+        rb.print_rebalance()
+
+    elif parts[0] == "targets":
+        from modules.rebalance import RebalanceAdvisor
+        rb = RebalanceAdvisor(portfolio, market)
+        rb.print_targets()
+
+    elif parts[0] == "targets-set":
+        # targets-set BTC 40 ETH 30 BNB 20 ADA 10
+        from modules.rebalance import RebalanceAdvisor
+        rb = RebalanceAdvisor(portfolio, market)
+        alloc_parts = parts[1:]
+        allocations = {}
+        i = 0
+        while i < len(alloc_parts) - 1:
+            try:
+                coin_k = alloc_parts[i].upper()
+                pct_v  = float(alloc_parts[i + 1])
+                allocations[coin_k] = pct_v
+                i += 2
+            except (ValueError, IndexError):
+                i += 1
+        if allocations:
+            rb.set_targets(allocations)
+        else:
+            console.print("[red]Usage: targets-set BTC 40 ETH 30 BNB 20 ADA 10[/red]")
+
+    # ── Yield Optimizer ─────────────────────────────────────────────────────
+    elif parts[0] == "yield":
+        from modules.yield_optimizer import YieldOptimizer
+        yo = YieldOptimizer(client, portfolio)
+        yo.print_yield()
 
     elif parts[0] == "news":
         limit = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 5

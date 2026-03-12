@@ -63,6 +63,14 @@ BOT_COMMANDS = [
     BotCommand("listings",    "New coin listings on Binance"),
     BotCommand("launchpool",  "Active launchpools & HODLer airdrops"),
     BotCommand("watchstatus", "Check if news watcher is active"),
+    BotCommand("journal",     "Show your decision journal"),
+    BotCommand("journalperf", "Journal P&L vs current prices"),
+    BotCommand("pnl",         "P&L summary (FIFO, 90 days)"),
+    BotCommand("pnlexport",   "Export P&L to CSV"),
+    BotCommand("rebalance",   "Portfolio rebalancing suggestions"),
+    BotCommand("targets",     "Show target allocation"),
+    BotCommand("targetsset",  "Set target allocation (e.g. BTC 40 ETH 30)"),
+    BotCommand("yield",       "Stablecoin yield optimizer"),
 ]
 
 
@@ -685,6 +693,103 @@ def build_app(client: Spot, market: MarketData):
     app.add_handler(CommandHandler("news",        news_cmd))
     app.add_handler(CommandHandler("listings",    listings_cmd))
     app.add_handler(CommandHandler("launchpool",  launchpool_cmd))
+
+    # ── Decision Journal ─────────────────────────────────────────────────────
+
+    async def journal_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if not await auth(update): return
+        from modules.journal import DecisionJournal
+        j = DecisionJournal(market=market)
+        coin_arg = context.args[0].upper() if context.args else None
+        await _send(update, j.format_journal_html(coin=coin_arg))
+
+    async def journalperf_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if not await auth(update): return
+        await _send(update, "<i>Calculating journal performance...</i>")
+        from modules.journal import DecisionJournal
+        j = DecisionJournal(market=market)
+        await _send(update, j.format_performance_html())
+
+    app.add_handler(CommandHandler("journal",     journal_cmd))
+    app.add_handler(CommandHandler("journalperf", journalperf_cmd))
+
+    # ── P&L Calculator ───────────────────────────────────────────────────────
+
+    async def pnl_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if not await auth(update): return
+        await _send(update, "<i>Fetching trade history from Binance (90 days)...</i>")
+        from modules.pnl import PnLCalculator
+        pnl_mod = PnLCalculator(client, market, portfolio_mod)
+        sym = context.args[0].upper() if context.args else None
+        await _send(update, pnl_mod.format_pnl_html(symbol=sym))
+
+    async def pnlexport_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if not await auth(update): return
+        await _send(update, "<i>Generating P&amp;L export...</i>")
+        from modules.pnl import PnLCalculator, EXPORT_PATH
+        pnl_mod = PnLCalculator(client, market, portfolio_mod)
+        pnl_mod.export_csv()
+        await _send(update, f"✅ CSV exported to:\n<code>{EXPORT_PATH}</code>\n"
+                            "Import into Koinly or CoinTracking for full tax report.")
+
+    app.add_handler(CommandHandler("pnl",       pnl_cmd))
+    app.add_handler(CommandHandler("pnlexport", pnlexport_cmd))
+
+    # ── Rebalancing ──────────────────────────────────────────────────────────
+
+    async def rebalance_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if not await auth(update): return
+        await _send(update, "<i>Analysing portfolio vs targets...</i>")
+        from modules.rebalance import RebalanceAdvisor
+        rb = RebalanceAdvisor(portfolio_mod, market)
+        await _send(update, rb.format_rebalance_html())
+
+    async def targets_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if not await auth(update): return
+        from modules.rebalance import RebalanceAdvisor
+        rb = RebalanceAdvisor(portfolio_mod, market)
+        await _send(update, rb.format_targets_html())
+
+    async def targetsset_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if not await auth(update): return
+        # /targetsset BTC 40 ETH 30 BNB 20 ADA 10
+        from modules.rebalance import RebalanceAdvisor
+        rb = RebalanceAdvisor(portfolio_mod, market)
+        args = context.args
+        allocations = {}
+        i = 0
+        while i < len(args) - 1:
+            try:
+                allocations[args[i].upper()] = float(args[i + 1])
+                i += 2
+            except (ValueError, IndexError):
+                i += 1
+        if not allocations:
+            await _send(update, "❌ Usage: <code>/targetsset BTC 40 ETH 30 BNB 20 ADA 10</code>")
+            return
+        ok = rb.set_targets(allocations)
+        if ok:
+            lines = ["✅ <b>Target allocation saved:</b>"]
+            for coin, pct in sorted(allocations.items(), key=lambda x: -x[1]):
+                lines.append(f"• <b>{coin}</b> — {pct:.1f}%")
+            await _send(update, "\n".join(lines))
+        else:
+            await _send(update, "❌ Targets must sum to 100%. Check your percentages.")
+
+    app.add_handler(CommandHandler("rebalance",  rebalance_cmd))
+    app.add_handler(CommandHandler("targets",    targets_cmd))
+    app.add_handler(CommandHandler("targetsset", targetsset_cmd))
+
+    # ── Yield Optimizer ──────────────────────────────────────────────────────
+
+    async def yield_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if not await auth(update): return
+        await _send(update, "<i>Checking Binance Simple Earn rates...</i>")
+        from modules.yield_optimizer import YieldOptimizer
+        yo = YieldOptimizer(client, portfolio_mod)
+        await _send(update, yo.format_yield_html())
+
+    app.add_handler(CommandHandler("yield", yield_cmd))
 
     async def watchstatus_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not await auth(update): return

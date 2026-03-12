@@ -141,6 +141,15 @@ case "$COMMAND" in
         echo "✅ BinanceCoach updated successfully"
         echo "   Your .env and alert data are preserved."
         ;;
+    journal)        run_cmd "journal ${ARGS[0]:-}" ;;
+    journal-add)    run_cmd "journal-add ${ARGS[*]}" ;;
+    journal-perf)   run_cmd "journal-perf" ;;
+    pnl)            run_cmd "pnl ${ARGS[0]:-}" ;;
+    pnl-export)     run_cmd "pnl-export" ;;
+    rebalance)      run_cmd "rebalance" ;;
+    targets)        run_cmd "targets" ;;
+    targets-set)    run_cmd "targets-set ${ARGS[*]}" ;;
+    yield)          run_cmd "yield" ;;
     news)         run_cmd "news ${ARGS[0]:-}" ;;
     listings)     run_cmd "listings ${ARGS[0]:-}" ;;
     launchpool)   run_cmd "launchpool" ;;
@@ -174,6 +183,16 @@ case "$COMMAND" in
         echo "  check-alerts         Check if any alert triggered"
         echo "  learn [TOPIC]        Educational lessons"
         echo "  project [SYMBOL]     12-month DCA projection"
+        echo "  journal [COIN]       Show decision journal (optionally filter by coin)"
+        echo "  journal-add C A P [AMT] [note]  Log a buy/sell decision"
+        echo "             e.g.: journal-add ADA buy 0.262 100 \"oversold -49% SMA200\""
+        echo "  journal-perf         Journal entries vs current price (unrealised P&L)"
+        echo "  pnl [SYMBOL]         P&L summary from Binance trade history (FIFO, 90d)"
+        echo "  pnl-export           Export P&L to CSV for Koinly / CoinTracking"
+        echo "  rebalance            Portfolio rebalancing suggestions"
+        echo "  targets              Show target allocation"
+        echo "  targets-set C% ...   Set targets: targets-set BTC 40 ETH 30 BNB 20 ADA 10"
+        echo "  yield                Stablecoin yield optimizer"
         echo "  news [N]             Latest Binance news & announcements (default: 5)"
         echo "  listings [N]         New coin listings (default: 5)"
         echo "  launchpool           Active launchpools & HODLer airdrops"

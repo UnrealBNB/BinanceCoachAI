@@ -92,6 +92,7 @@ binance-coach/
 │   ├── behavior.py            # Behavioral bias detection
 │   ├── alerts.py              # Price/RSI alert system
 │   ├── education.py           # Educational lessons
+│   ├── news.py                # News, listings, launchpool fetcher + watcher daemon
 │   ├── ai_coach.py            # Claude AI coaching engine
 │   ├── i18n.py                # Translation loader
 │   ├── tg_utils.py            # Telegram HTML helpers
@@ -99,8 +100,11 @@ binance-coach/
 │       ├── en.py              # English strings + lessons
 │       └── nl.py              # Dutch strings + lessons
 ├── bot/
-│   └── telegram_bot.py        # Telegram bot (17 commands)
+│   └── telegram_bot.py        # Telegram bot (21 commands + auto news/alert polling)
 ├── data/                      # SQLite databases (gitignored)
+│   ├── alerts.db              # Price/RSI alert state
+│   ├── seen_news.db           # Dedup tracker for news watcher
+│   └── watcher.log            # Background watcher log (watch-bg)
 └── openclaw-skill/            # This OpenClaw skill
     └── binance-coach/
 ```

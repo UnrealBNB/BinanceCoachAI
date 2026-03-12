@@ -82,9 +82,33 @@ bc.sh model claude-sonnet-4-6          # Switch active model
 
 **`ask` auto-enrichment**: Detects coin symbols in the question and fetches live market data for each. Always includes full portfolio, holdings, behavioral analysis, and Fear & Greed. Claude never has to ask "what's your portfolio?" — it already knows.
 
+### News & Announcements
+```bash
+bc.sh news                             # Latest 5 Binance news/announcements
+bc.sh news 10                          # Latest 10 items
+bc.sh listings                         # New coin listings (last 5)
+bc.sh listings 10                      # New coin listings (last 10)
+bc.sh launchpool                       # Active launchpools & HODLer airdrops
+bc.sh news-check                       # Only show NEW unseen items (deduped, heartbeat use)
+```
+
+Returns: article title, date, and clickable URL. Portfolio cross-reference: flags if a listed coin matches your holdings.
+
+### Real-time Watcher
+```bash
+bc.sh watch                            # Poll every 60s, notify Telegram on new items (foreground)
+bc.sh watch 30                         # Poll every 30s
+bc.sh watch-bg                         # Same but runs in background (nohup, survives logout)
+bc.sh watch-bg 30                      # Background watcher at 30s interval
+bc.sh watch-stop                       # Stop the running background watcher
+bc.sh watch-status                     # Check if watcher is running + PID
+```
+
+Requirements: `TELEGRAM_BOT_TOKEN` and `TELEGRAM_USER_ID` must be set in `.env`.
+
 ### Bot Modes
 ```bash
-bc.sh telegram                         # Start Telegram bot (persistent)
+bc.sh telegram                         # Start Telegram bot (persistent, polls news every 2 min)
 bc.sh demo                             # Demo mode (no Binance API keys needed)
 ```
 
@@ -92,7 +116,7 @@ bc.sh demo                             # Demo mode (no Binance API keys needed)
 
 ## Telegram Bot Commands
 
-Same functionality via Telegram. All 17 commands:
+Same functionality via Telegram. All 21 commands:
 
 | Command | Description |
 |---|---|
@@ -113,6 +137,14 @@ Same functionality via Telegram. All 17 commands:
 | `/models` | List Claude models |
 | `/model <id>` | Switch Claude model |
 | `/lang` | Change language (inline buttons) |
+| `/news` | Latest Binance news & announcements |
+| `/listings` | New coin listings |
+| `/launchpool` | Active launchpools & HODLer airdrops |
+| `/watchstatus` | Check if background watcher is running |
+
+**Auto-notifications (Telegram bot only):**
+- **Alerts:** checked every 5 minutes, pushed automatically when triggered
+- **News/listings/launchpools:** checked every **2 minutes**, pushed automatically when new items appear — no command needed
 
 ---
 

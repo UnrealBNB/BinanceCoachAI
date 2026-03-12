@@ -60,9 +60,15 @@ Just talk naturally to your OpenClaw assistant:
 > *"Is my trading behavior healthy?"*  
 > *"Should I sell all my DOGE?"* ← Claude already has your live portfolio loaded  
 > *"Explain what RSI oversold means"*  
-> *"Set an alert for BTC below $60,000"*
+> *"Set an alert for BTC below $60,000"*  
+> *"What are the latest Binance news and announcements?"*  
+> *"Any new coin listings?"*  
+> *"Are there any active launchpools or HODLer airdrops?"*  
+> *"Notify me the moment something new drops on Binance"*
 
 No slash commands. No separate app. OpenClaw loads the skill and runs it.
+
+> 🔗 **Auto-hooks into OpenClaw on install:** BinanceCoach automatically writes a preference to your OpenClaw `USER.md` so every future session uses the skill for all crypto questions — without you having to ask.
 
 ---
 
@@ -103,6 +109,31 @@ BinanceCoach is your AI accountability partner that identifies these patterns in
 ---
 
 ## ✨ Features
+
+### 📰 News, Listings & Real-time Watcher *(new in v1.2)*
+
+Stay ahead of the market with live Binance announcement tracking:
+
+- **Latest news** — Fetches from Binance's public CMS API (no API key needed)
+- **New listings** — Know the moment a new coin lands on Binance
+- **Launchpools & HODLer airdrops** — Auto-detected from announcement titles
+- **Delistings** — Track coins being removed (important for holders)
+- **Portfolio cross-reference** — Flags announcements that affect coins you actually hold
+- **Real-time watcher** — Background daemon polling every 60s, instant Telegram push when something new drops
+
+```bash
+bc.sh news              # Latest Binance news
+bc.sh listings          # New coin listings
+bc.sh launchpool        # Active launchpools & HODLer airdrops
+bc.sh news-check        # New unseen items only (perfect for heartbeat/cron)
+bc.sh watch-bg          # Start background watcher — notifies Telegram within 60s
+bc.sh watch-stop        # Stop the watcher
+bc.sh watch-status      # Check if watcher is running
+```
+
+Telegram bot gets `/news`, `/listings`, `/launchpool`, `/watchstatus` commands + **auto-pushes every 2 minutes** when new items appear.
+
+---
 
 ### 🔍 Behavioral Bias Detector
 Analyzes your last 30 days of trades and detects:
@@ -200,6 +231,7 @@ BinanceCoachAI/
 │   ├── dca.py                     # Smart DCA advisor (25-combo RSI × F&G matrix)
 │   ├── behavior.py                # Behavioral bias detector
 │   ├── alerts.py                  # Context-rich price alert system
+│   ├── news.py                    # News, listings, launchpool fetcher + watcher daemon
 │   ├── education.py               # Educational content module
 │   ├── ai_coach.py                # Claude AI coaching engine
 │   ├── i18n.py                    # Translation loader
@@ -209,19 +241,23 @@ BinanceCoachAI/
 │       └── nl.py                  # Dutch strings + lessons
 │
 ├── bot/
-│   └── telegram_bot.py            # Telegram bot (17 commands, HTML formatting)
+│   └── telegram_bot.py            # Telegram bot (21 commands, auto news/alert polling)
 │
 ├── openclaw-skill/
 │   └── binance-coach/             # OpenClaw skill (published on ClaWHub)
 │       ├── SKILL.md               # Skill definition — triggers & instructions
 │       ├── scripts/
 │       │   ├── bc.sh              # CLI wrapper (auto-finds project, dispatches commands)
-│       │   └── setup.sh           # Interactive first-time setup
+│       │   └── setup.sh           # Interactive first-time setup + USER.md auto-hook
 │       └── references/
+│           ├── agent-guide.md     # Internal OpenClaw agent dispatch instructions
 │           ├── commands.md        # Full command reference
 │           └── setup.md           # API key setup guide
 │
 └── data/                          # SQLite databases (auto-created, gitignored)
+    ├── alerts.db                  # Price/RSI alert state
+    ├── seen_news.db               # News dedup tracker for watcher
+    └── watcher.log                # Background watcher log
 ```
 
 ---
@@ -277,6 +313,14 @@ python main.py --demo   # Demo (no API key needed — public market data only)
 | `alert BTCUSDT rsi_below 30` | Set RSI alert |
 | `alerts` | List active alerts |
 | `check-alerts` | Manually check if any alerts triggered |
+| `news [N]` | Latest Binance news (default: 5) |
+| `listings [N]` | New coin listings (default: 5) |
+| `launchpool` | Active launchpools & HODLer airdrops |
+| `news-check` | New unseen announcements only (for heartbeat/cron) |
+| `watch [SECS]` | Watch for announcements, notify Telegram (foreground) |
+| `watch-bg [SECS]` | Same but runs in background (nohup) |
+| `watch-stop` | Stop the background watcher |
+| `watch-status` | Check if watcher is running |
 | `learn` | List all 7 lessons |
 | `learn dca` | Read a specific lesson |
 | `project BTCUSDT` | 12-month DCA projection |
@@ -296,7 +340,7 @@ python main.py --demo   # Demo (no API key needed — public market data only)
 python main.py --telegram
 ```
 
-All 17 commands registered with Telegram (shows in autocomplete):
+All 21 commands registered with Telegram (shows in autocomplete):
 
 | Command | Description |
 |---------|-------------|
@@ -317,6 +361,14 @@ All 17 commands registered with Telegram (shows in autocomplete):
 | `/models` | 🤖 List Claude models |
 | `/model <id>` | 🤖 Switch Claude model |
 | `/lang` | 🌐 Choose language (inline buttons) |
+| `/news` | 📰 Latest Binance news & announcements |
+| `/listings` | 🆕 New coin listings |
+| `/launchpool` | 🌾 Active launchpools & HODLer airdrops |
+| `/watchstatus` | 👁 Check if background watcher is running |
+
+**Auto-notifications (no command needed):**
+- 🔔 **Alerts** — checked every 5 min, pushed when triggered
+- 📰 **News/listings/launchpools** — checked every **2 minutes**, pushed when new items appear
 
 All messages use Telegram HTML formatting — no Markdown rendering issues.
 

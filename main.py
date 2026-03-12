@@ -683,6 +683,78 @@ def _dispatch_command(cmd_str, client, market, portfolio, dca, alert_mgr, behavi
             )
             console.print(t("cli.lang_list", langs=lang_list))
 
+    elif parts[0] == "news":
+        limit = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 5
+        from modules.news import BinanceNews
+        news_mod = BinanceNews()
+        articles = news_mod.get_latest_news(limit=limit)
+        news_mod.print_news(articles)
+
+    elif parts[0] == "listings":
+        limit = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 5
+        from modules.news import BinanceNews
+        news_mod = BinanceNews()
+        articles = news_mod.get_new_listings(limit=limit)
+        news_mod.print_listings(articles)
+
+    elif parts[0] == "launchpool":
+        from modules.news import BinanceNews
+        news_mod = BinanceNews()
+        articles = news_mod.get_launchpool(limit=5)
+        news_mod.print_launchpool(articles)
+
+    elif parts[0] == "watch":
+        interval = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 60
+        from modules.news import run_watcher, watcher_status
+        status = watcher_status()
+        if status["running"]:
+            console.print(f"[yellow]⚠️  Watcher already running (PID {status['pid']}). Run 'watch-stop' first.[/yellow]")
+        else:
+            try:
+                _bals = portfolio.get_balances()
+                _portfolio_arg = portfolio
+            except Exception:
+                _portfolio_arg = None
+            run_watcher(interval=interval, portfolio=_portfolio_arg)
+
+    elif parts[0] == "watch-stop":
+        from modules.news import stop_watcher
+        stopped = stop_watcher()
+        if stopped:
+            console.print("[green]✅ Watcher stopped.[/green]")
+        else:
+            console.print("[yellow]No watcher running.[/yellow]")
+
+    elif parts[0] == "watch-status":
+        from modules.news import watcher_status
+        status = watcher_status()
+        if status["running"]:
+            console.print(f"[green]✅ Watcher running (PID {status['pid']})[/green]")
+        else:
+            console.print("[yellow]Watcher not running.[/yellow]")
+
+    elif parts[0] == "news-check":
+        from modules.news import BinanceNews
+        try:
+            _portfolio_for_news = portfolio
+        except Exception:
+            _portfolio_for_news = None
+        news_mod = BinanceNews(portfolio=_portfolio_for_news)
+        result = news_mod.check_and_format_new()
+        if result["has_new"]:
+            if result["listings"]:
+                news_mod.print_listings(result["listings"])
+            if result["launchpool"]:
+                news_mod.print_launchpool(result["launchpool"])
+            if result["news"]:
+                news_mod.print_news(result["news"])
+            if result["portfolio_hits"]:
+                console.print("\n[bold yellow]⚡ Portfolio-relevant news:[/bold yellow]")
+                for hit in result["portfolio_hits"]:
+                    console.print(f"  • [{hit.get('matched_asset', '')}] {hit['title']}")
+        else:
+            console.print("[green]✅ No new announcements since last check.[/green]")
+
     elif parts[0] == "help":
         console.print(t("cli.help"))
 

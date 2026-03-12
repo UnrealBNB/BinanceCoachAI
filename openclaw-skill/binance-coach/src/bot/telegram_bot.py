@@ -59,6 +59,10 @@ BOT_COMMANDS = [
     BotCommand("models",      "List Claude models"),
     BotCommand("model",       "Switch Claude model"),
     BotCommand("lang",        "Switch language (en/nl)"),
+    BotCommand("news",        "Latest Binance news & announcements"),
+    BotCommand("listings",    "New coin listings on Binance"),
+    BotCommand("launchpool",  "Active launchpools & HODLer airdrops"),
+    BotCommand("watchstatus", "Check if news watcher is active"),
 ]
 
 
@@ -652,6 +656,47 @@ def build_app(client: Spot, market: MarketData):
 
     app.add_handler(CallbackQueryHandler(lang_callback, pattern=r"^setlang:"))
 
+    # ── News / Listings / Launchpool commands ─────────────────────────────
+
+    async def news_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if not await auth(update): return
+        await _send(update, "<i>Fetching latest Binance news...</i>")
+        from modules.news import BinanceNews
+        news_mod = BinanceNews()
+        articles = news_mod.get_latest_news(limit=5)
+        await _send(update, news_mod.format_news_html(articles))
+
+    async def listings_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if not await auth(update): return
+        await _send(update, "<i>Fetching new listings...</i>")
+        from modules.news import BinanceNews
+        news_mod = BinanceNews()
+        articles = news_mod.get_new_listings(limit=5)
+        await _send(update, news_mod.format_listings_html(articles))
+
+    async def launchpool_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if not await auth(update): return
+        await _send(update, "<i>Checking launchpools &amp; airdrops...</i>")
+        from modules.news import BinanceNews
+        news_mod = BinanceNews()
+        articles = news_mod.get_launchpool(limit=5)
+        await _send(update, news_mod.format_launchpool_html(articles))
+
+    app.add_handler(CommandHandler("news",        news_cmd))
+    app.add_handler(CommandHandler("listings",    listings_cmd))
+    app.add_handler(CommandHandler("launchpool",  launchpool_cmd))
+
+    async def watchstatus_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if not await auth(update): return
+        from modules.news import watcher_status
+        status = watcher_status()
+        if status["running"]:
+            await _send(update, f"👁 <b>Watcher is running</b> (PID {status['pid']})\nPolling Binance every 2 min via bot job queue.")
+        else:
+            await _send(update, "🔴 <b>Standalone watcher not running.</b>\nThe bot's built-in job checks every 2 min automatically while the bot is active.\nFor always-on watching, run: <code>bc.sh watch-bg</code> on your server.")
+
+    app.add_handler(CommandHandler("watchstatus", watchstatus_cmd))
+
     # ── Background alert polling ───────────────────────────────────────────
     ALERT_POLL_INTERVAL = 300  # seconds (5 minutes)
     authorized_uid = int(os.getenv("TELEGRAM_USER_ID", "0"))
@@ -681,6 +726,38 @@ def build_app(client: Spot, market: MarketData):
         except Exception as exc:
             logger.warning("Alert poll error: %s", exc)
 
+    async def news_check_job(context) -> None:
+        """Background job: check for new Binance announcements every 30 min."""
+        try:
+            from modules.news import BinanceNews
+            news_mod = BinanceNews(portfolio=portfolio_mod)
+            result = news_mod.check_and_format_new()
+            if not result["has_new"] or not authorized_uid:
+                return
+            parts_html = []
+            if result["launchpool"]:
+                parts_html.append(news_mod.format_launchpool_html(result["launchpool"]))
+            if result["listings"]:
+                parts_html.append(news_mod.format_listings_html(result["listings"]))
+            if result["news"]:
+                parts_html.append(news_mod.format_news_html(result["news"], "📰 New Binance Announcement"))
+            if result["portfolio_hits"]:
+                hits_text = "\n".join(
+                    f"⚡ {h.get('matched_asset','?')}: {h['title']}"
+                    for h in result["portfolio_hits"]
+                )
+                parts_html.append(f"<b>⚡ Affects your portfolio:</b>\n{hits_text}")
+            if parts_html:
+                msg = "\n\n".join(parts_html)
+                for chunk in split_html(msg):
+                    await context.bot.send_message(
+                        chat_id=authorized_uid,
+                        text=chunk,
+                        parse_mode=HTML,
+                    )
+        except Exception as exc:
+            logger.warning("News check job error: %s", exc)
+
     async def post_init(application: Application):
         await application.bot.set_my_commands(BOT_COMMANDS)
         logger.info("Bot commands registered with Telegram")
@@ -689,12 +766,19 @@ def build_app(client: Spot, market: MarketData):
             application.job_queue.run_repeating(
                 poll_alerts,
                 interval=ALERT_POLL_INTERVAL,
-                first=60,  # first check after 1 minute
+                first=60,
                 name="alert_poller",
             )
             logger.info("Alert poller started — checking every %ds", ALERT_POLL_INTERVAL)
+            application.job_queue.run_repeating(
+                news_check_job,
+                interval=120,  # 2 minutes
+                first=90,      # first check after 90 seconds
+                name="news_poller",
+            )
+            logger.info("News poller started — checking every 2 minutes")
         else:
-            logger.warning("TELEGRAM_USER_ID not set — alert polling disabled")
+            logger.warning("TELEGRAM_USER_ID not set — alert/news polling disabled")
 
     app.post_init = post_init
 

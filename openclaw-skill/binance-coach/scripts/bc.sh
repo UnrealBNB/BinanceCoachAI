@@ -136,6 +136,27 @@ case "$COMMAND" in
         echo "✅ BinanceCoach updated successfully"
         echo "   Your .env and alert data are preserved."
         ;;
+    news)         run_cmd "news ${ARGS[0]:-}" ;;
+    listings)     run_cmd "listings ${ARGS[0]:-}" ;;
+    launchpool)   run_cmd "launchpool" ;;
+    news-check)   run_cmd "news-check" ;;
+    watch)
+        INTERVAL="${ARGS[0]:-60}"
+        echo "👁  Starting BinanceCoach watcher (interval: ${INTERVAL}s)..."
+        echo "    Ctrl+C to stop, or run: bc.sh watch-stop"
+        run_cmd "watch ${INTERVAL}"
+        ;;
+    watch-bg)
+        INTERVAL="${ARGS[0]:-60}"
+        LOG_FILE="$PROJECT/data/watcher.log"
+        nohup bash "${BASH_SOURCE[0]}" watch "$INTERVAL" >> "$LOG_FILE" 2>&1 &
+        BG_PID=$!
+        echo "👁  Watcher started in background (PID: $BG_PID)"
+        echo "    Logs: $LOG_FILE"
+        echo "    Stop: bc.sh watch-stop"
+        ;;
+    watch-stop)   run_cmd "watch-stop" ;;
+    watch-status) run_cmd "watch-status" ;;
     help|--help|-h)
         echo "BinanceCoach — commands:"
         echo "  portfolio            Portfolio health score & analysis"
@@ -148,6 +169,14 @@ case "$COMMAND" in
         echo "  check-alerts         Check if any alert triggered"
         echo "  learn [TOPIC]        Educational lessons"
         echo "  project [SYMBOL]     12-month DCA projection"
+        echo "  news [N]             Latest Binance news & announcements (default: 5)"
+        echo "  listings [N]         New coin listings (default: 5)"
+        echo "  launchpool           Active launchpools & HODLer airdrops"
+        echo "  news-check           Check for new unseen announcements (heartbeat use)"
+        echo "  watch [SECS]         Watch for new announcements, notify Telegram (default: 60s)"
+        echo "  watch-bg [SECS]      Same but runs in background (nohup)"
+        echo "  watch-stop           Stop the running watcher"
+        echo "  watch-status         Check if watcher is running"
         echo "  coach                AI coaching summary (needs Anthropic key)"
         echo "  weekly               AI weekly brief (needs Anthropic key)"
         echo "  ask <question>       Ask Claude (needs Anthropic key)"

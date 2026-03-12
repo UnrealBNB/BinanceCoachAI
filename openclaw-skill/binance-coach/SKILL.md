@@ -60,13 +60,15 @@ Binance API key + secret (read-only)
 
 Just say: **"analyze my portfolio"** or **"set up BinanceCoach"** — your assistant handles the rest.
 
-## 🔗 Auto-hooks into OpenClaw
+## 🔗 Optional: Hook into OpenClaw as default crypto handler
 
-When BinanceCoach is installed, it automatically registers itself as your **default crypto handler** by writing a preference into your OpenClaw `USER.md`. This means:
+During setup, you'll be asked if you want BinanceCoach registered as your default handler for all crypto questions. If you say yes, a preference block is added to your OpenClaw `USER.md`:
 
-- Every session from that point on, your assistant knows to use BinanceCoach for **any** crypto question — without you needing to say so
+- Every session from that point on, your assistant uses BinanceCoach automatically for any crypto question
 - Covers: DCA, portfolio, market data, news, launchpools, listings, behavior analysis, alerts, projections, and more
-- No manual configuration needed after install — it just works
+- You can remove it anytime by editing `USER.md`
+
+**This is opt-in — setup will always ask before modifying any config files.**
 
 ---
 

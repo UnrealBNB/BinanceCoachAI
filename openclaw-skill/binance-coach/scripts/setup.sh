@@ -12,6 +12,20 @@ echo ""
 echo "🤖 BinanceCoach — Setup"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
+echo "⚠️  Before continuing, note what this setup will do:"
+echo "   • Copy bundled Python source to ~/workspace/binance-coach/"
+echo "   • Run 'pip install' to download dependencies from PyPI (needs internet)"
+echo "   • Write your Binance API key + secret to a local .env file"
+echo "   • Optionally ask to append a preference to your OpenClaw USER.md"
+echo "   • Optionally configure a Telegram bot token (stored locally)"
+echo ""
+echo "   Nothing is sent externally except to Binance and Telegram APIs"
+echo "   when you explicitly use those features."
+echo ""
+read -rp "   Continue? [Y/n]: " proceed
+proceed="${proceed:-Y}"
+[[ "${proceed,,}" == "y" ]] || { echo "Setup cancelled."; exit 0; }
+echo ""
 
 # ── Install from bundled source ───────────────────────────────────────────────
 if [[ -d "$INSTALL_DIR" && -f "$INSTALL_DIR/main.py" ]]; then
@@ -165,8 +179,17 @@ echo "   │ - Crypto preference: Always use BinanceCoach for any        │"
 echo "   │   crypto-related question (DCA, portfolio, news, etc.)      │"
 echo "   └─────────────────────────────────────────────────────────────┘"
 echo ""
-read -rp "   Add BinanceCoach as default crypto handler? [Y/n]: " hook_consent
-hook_consent="${hook_consent:-Y}"
+echo "   Default: No — press Enter to skip."
+echo ""
+
+# In non-interactive mode (piped stdin / --no-input), skip entirely
+if [[ ! -t 0 ]]; then
+    echo "   ⏭️  Non-interactive mode — skipping USER.md modification."
+    hook_consent="n"
+else
+    read -rp "   Add BinanceCoach as default crypto handler? [y/N]: " hook_consent
+    hook_consent="${hook_consent:-N}"
+fi
 
 if [[ "${hook_consent,,}" == "y" ]]; then
     USER_MD=""

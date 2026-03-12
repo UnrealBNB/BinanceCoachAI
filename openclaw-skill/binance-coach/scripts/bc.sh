@@ -103,6 +103,11 @@ case "$COMMAND" in
         echo "   Changelog: https://clawhub.ai/skills/binance-coach"
         echo "   Source:    https://github.com/UnrealBNB/BinanceCoachAI"
         echo ""
+        echo "   This will:"
+        echo "   • Fetch updated skill files from ClaWHub/GitHub (network access)"
+        echo "   • Run pip install to update Python dependencies from PyPI"
+        echo "   • Your .env and alert data are preserved"
+        echo ""
         printf "   Proceed with update? [y/N] "
         read -r confirm
         [[ "$confirm" =~ ^[Yy]$ ]] || { echo "Update cancelled."; exit 0; }

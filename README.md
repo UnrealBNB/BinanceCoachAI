@@ -27,9 +27,10 @@ After installation, tell your OpenClaw assistant to set it up:
 > *"Set up BinanceCoach"*
 
 OpenClaw will run the setup script automatically, which:
-1. **Copies bundled source** to `~/workspace/binance-coach/` — no internet required, all code ships inside the skill
-2. **Installs** Python dependencies via pip
-3. **Asks you interactively** for your API keys:
+1. **Shows a disclosure** of exactly what it will do before proceeding
+2. **Copies bundled source** to `~/workspace/binance-coach/` — code ships inside the skill
+3. **Downloads Python dependencies** via pip from PyPI (requires internet)
+4. **Asks you interactively** for your API keys:
    - Binance API key + secret (read-only) ← **required**
    - Anthropic API key ← **not needed in OpenClaw mode** (see below)
    - Telegram bot token + your user ID (optional, for standalone bot)

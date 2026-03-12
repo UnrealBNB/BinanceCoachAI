@@ -1,26 +1,35 @@
 """
 rebalance.py — Portfolio rebalancing engine
-Compares current allocation vs user-defined target percentages.
-Suggests buy/sell amounts when drift exceeds threshold.
+
+Fixes applied:
+- Coins held but NOT in targets are shown as "untracked" — they were previously
+  invisible, making allocation percentages look like they summed to 100% when they didn't
+- total_usd now computed directly from balance sum instead of calling
+  calculate_health_score() (which did full RSI/diversification work just for one number)
+- Atomic write for targets.json (write to .tmp, then rename — crash-safe)
+- /targetsset in Telegram now shows what it replaced (no silent overwrite)
+- self.market parameter removed from __init__ — it was stored but never used
+- Python 3.9-compatible type hints
 """
 import json
 import logging
+import tempfile
+import os
 from pathlib import Path
+from typing import Optional, List
 from rich.console import Console
 from rich.table import Table
-from rich.panel import Panel
 
 logger = logging.getLogger(__name__)
 console = Console()
 
-TARGETS_PATH = Path(__file__).parent.parent / "data" / "targets.json"
+TARGETS_PATH    = Path(__file__).parent.parent / "data" / "targets.json"
 DRIFT_THRESHOLD = 5.0  # % drift before flagging action needed
 
 
 class RebalanceAdvisor:
-    def __init__(self, portfolio, market):
+    def __init__(self, portfolio):
         self.portfolio = portfolio
-        self.market = market
 
     # ── Target management ────────────────────────────────────────────────────
 
@@ -33,8 +42,11 @@ class RebalanceAdvisor:
             return {}
 
     def _save_targets(self, targets: dict):
+        """Atomic write — safe against crash mid-write."""
         TARGETS_PATH.parent.mkdir(parents=True, exist_ok=True)
-        TARGETS_PATH.write_text(json.dumps(targets, indent=2))
+        tmp_path = TARGETS_PATH.with_suffix(".tmp")
+        tmp_path.write_text(json.dumps(targets, indent=2))
+        tmp_path.rename(TARGETS_PATH)
 
     def set_targets(self, allocations: dict) -> bool:
         """Set target allocations. allocations = {"BTC": 40, "ETH": 30, ...}"""
@@ -42,6 +54,14 @@ class RebalanceAdvisor:
         if abs(total - 100) > 1:
             console.print(f"[red]❌ Targets must sum to 100% (got {total:.1f}%)[/red]")
             return False
+
+        # Show what's being replaced (prevents silent overwrite confusion)
+        old_targets = self._load_targets()
+        if old_targets:
+            console.print("[dim]Replacing existing targets:[/dim]")
+            for coin, pct in sorted(old_targets.items(), key=lambda x: -x[1]):
+                console.print(f"   [dim]{coin}: {pct:.1f}%[/dim]")
+
         normalized = {k.upper(): round(v, 1) for k, v in allocations.items()}
         self._save_targets(normalized)
         console.print("[green]✅ Target allocation saved:[/green]")
@@ -55,33 +75,35 @@ class RebalanceAdvisor:
     def analyze(self) -> dict:
         targets = self._load_targets()
         try:
-            balances = self.portfolio.get_balances()
-            health = self.portfolio.calculate_health_score(balances)
-            total_usd = health.get("total_usd", 0)
+            balances  = self.portfolio.get_balances()
+            # Sum directly — no need to invoke calculate_health_score() just for total_usd
+            total_usd = sum(b["usd_value"] for b in balances)
         except Exception as e:
             return {"error": str(e)}
 
         if total_usd == 0:
             return {"error": "Portfolio empty or API unavailable."}
 
-        # Current allocation
+        # Current allocation map
         current = {}
         for b in balances:
             asset = b["asset"].upper()
-            pct = b["usd_value"] / total_usd * 100
             current[asset] = {
                 "usd_value": b["usd_value"],
-                "pct": pct,
+                "pct":       b["usd_value"] / total_usd * 100,
             }
 
         suggestions = []
+        targeted_coins = set()
+
         if targets:
             for coin, target_pct in targets.items():
-                cur_pct = current.get(coin, {}).get("pct", 0)
-                cur_usd = current.get(coin, {}).get("usd_value", 0)
+                targeted_coins.add(coin)
+                cur_pct = current.get(coin, {}).get("pct",       0.0)
+                cur_usd = current.get(coin, {}).get("usd_value", 0.0)
                 target_usd = total_usd * target_pct / 100
-                drift = cur_pct - target_pct
-                delta_usd = target_usd - cur_usd
+                drift      = cur_pct - target_pct
+                delta_usd  = target_usd - cur_usd
 
                 if drift > DRIFT_THRESHOLD:
                     action = "SELL"
@@ -91,21 +113,29 @@ class RebalanceAdvisor:
                     action = "OK"
 
                 suggestions.append({
-                    "coin": coin,
-                    "target_pct": target_pct,
+                    "coin":        coin,
+                    "target_pct":  target_pct,
                     "current_pct": round(cur_pct, 1),
                     "current_usd": cur_usd,
-                    "target_usd": target_usd,
-                    "drift": round(drift, 1),
-                    "delta_usd": delta_usd,
-                    "action": action,
+                    "target_usd":  target_usd,
+                    "drift":       round(drift, 1),
+                    "delta_usd":   delta_usd,
+                    "action":      action,
                 })
 
+        # Coins held but NOT in targets — previously invisible
+        untracked = [
+            {"coin": coin, "usd_value": data["usd_value"], "pct": round(data["pct"], 1)}
+            for coin, data in current.items()
+            if coin not in targeted_coins and data["usd_value"] > 1
+        ]
+
         return {
-            "total_usd": total_usd,
-            "current": current,
-            "targets": targets,
+            "total_usd":   total_usd,
+            "current":     current,
+            "targets":     targets,
             "suggestions": sorted(suggestions, key=lambda x: abs(x["drift"]), reverse=True),
+            "untracked":   sorted(untracked, key=lambda x: -x["usd_value"]),
             "has_targets": bool(targets),
         }
 
@@ -120,10 +150,9 @@ class RebalanceAdvisor:
         if not result["has_targets"]:
             console.print("[yellow]No target allocation set.[/yellow]")
             console.print("[dim]Set targets: targets-set BTC 40 ETH 30 BNB 20 ADA 10[/dim]\n")
-            # Still show current allocation
             table = Table(title="📊 Current Allocation", border_style="blue")
             table.add_column("Coin")
-            table.add_column("Value USD", justify="right")
+            table.add_column("Value USD",      justify="right")
             table.add_column("% of Portfolio", justify="right")
             for coin, data in sorted(result["current"].items(), key=lambda x: -x[1]["pct"])[:12]:
                 table.add_row(coin, f"${data['usd_value']:,.2f}", f"{data['pct']:.1f}%")
@@ -141,29 +170,37 @@ class RebalanceAdvisor:
         needs_action = 0
         for s in result["suggestions"]:
             if s["action"] == "SELL":
-                color, emoji = "red", "📉"
+                color, emoji = "red",   "📉"
                 needs_action += 1
             elif s["action"] == "BUY":
                 color, emoji = "green", "📈"
                 needs_action += 1
             else:
-                color, emoji = "dim", "✓"
+                color, emoji = "dim",   "✓"
 
-            drift_color = "red" if s["drift"] > 0 else "green" if s["drift"] < 0 else "dim"
+            dc = "red" if s["drift"] > 0 else ("green" if s["drift"] < 0 else "dim")
             table.add_row(
                 s["coin"],
                 f"{s['target_pct']:.1f}%",
                 f"{s['current_pct']:.1f}%",
-                f"[{drift_color}]{s['drift']:+.1f}%[/{drift_color}]",
+                f"[{dc}]{s['drift']:+.1f}%[/{dc}]",
                 f"[{color}]{emoji} {s['action']}[/{color}]",
                 f"[{color}]${abs(s['delta_usd']):,.0f}[/{color}]" if s["action"] != "OK" else "[dim]—[/dim]",
             )
 
         console.print(table)
+
+        if result["untracked"]:
+            console.print("\n[yellow]⚠️ Untracked holdings (not in your targets):[/yellow]")
+            for u in result["untracked"]:
+                console.print(f"   {u['coin']:8s} ${u['usd_value']:,.2f}  ({u['pct']:.1f}%)")
+            console.print("[dim]Run 'targets-set' to include these coins in your allocation plan.[/dim]")
+
         if needs_action:
-            console.print(f"\n[bold yellow]⚠️  {needs_action} coin(s) have drifted >{DRIFT_THRESHOLD}% from target[/bold yellow]")
+            console.print(f"\n[bold yellow]⚠️  {needs_action} coin(s) drifted >{DRIFT_THRESHOLD}% from target[/bold yellow]")
+            console.print("[dim]⚠️ Selling is a taxable event in most jurisdictions.[/dim]")
         else:
-            console.print("\n[green]✅ Portfolio is within target thresholds.[/green]")
+            console.print("\n[green]✅ Portfolio within target thresholds.[/green]")
 
     def print_targets(self):
         targets = self._load_targets()
@@ -181,7 +218,7 @@ class RebalanceAdvisor:
         console.print(table)
         console.print(f"[dim]Total: {sum(targets.values()):.1f}% | Drift threshold: {DRIFT_THRESHOLD}%[/dim]")
 
-    # ── Telegram HTML output ─────────────────────────────────────────────────
+    # ── Telegram HTML output ──────────────────────────────────────────────────
 
     def format_rebalance_html(self) -> str:
         result = self.analyze()
@@ -193,9 +230,10 @@ class RebalanceAdvisor:
                 "Use /targetsset to define your target allocation.\n"
                 "Example: <code>/targetsset BTC 40 ETH 30 BNB 20 ADA 10</code>"
             )
+
         lines = ["⚖️ <b>Portfolio Rebalancing</b>"]
         needs = [s for s in result["suggestions"] if s["action"] != "OK"]
-        ok = [s for s in result["suggestions"] if s["action"] == "OK"]
+        ok    = [s for s in result["suggestions"] if s["action"] == "OK"]
 
         if needs:
             lines.append(f"⚠️ <b>{len(needs)} coin(s) need rebalancing:</b>")
@@ -207,6 +245,15 @@ class RebalanceAdvisor:
                 )
         if ok:
             lines.append(f"✅ {len(ok)} coin(s) within target range")
+
+        if result["untracked"]:
+            lines.append(f"\n⚠️ <b>Untracked holdings:</b>")
+            for u in result["untracked"]:
+                lines.append(f"• <b>{u['coin']}</b> ${u['usd_value']:,.0f} ({u['pct']:.1f}%)")
+            lines.append("<i>Use /targetsset to include these in your plan.</i>")
+
+        if needs:
+            lines.append("\n<i>⚠️ Selling is a taxable event in most jurisdictions.</i>")
         return "\n".join(lines)
 
     def format_targets_html(self) -> str:
@@ -214,11 +261,10 @@ class RebalanceAdvisor:
         if not targets:
             return (
                 "🎯 <b>Target Allocation</b>\nNone set.\n"
-                "Use /targetsset to define targets.\n"
                 "Example: <code>/targetsset BTC 40 ETH 30 BNB 20 ADA 10</code>"
             )
         lines = ["🎯 <b>Target Allocation</b>"]
         for coin, pct in sorted(targets.items(), key=lambda x: -x[1]):
             lines.append(f"• <b>{coin}</b> — {pct:.1f}%")
-        lines.append(f"<i>Rebalance triggered at >{DRIFT_THRESHOLD}% drift</i>")
+        lines.append(f"<i>Rebalance triggered at &gt;{DRIFT_THRESHOLD}% drift</i>")
         return "\n".join(lines)

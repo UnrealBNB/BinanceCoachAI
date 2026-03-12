@@ -143,6 +143,7 @@ case "$COMMAND" in
         ;;
     journal)        run_cmd "journal ${ARGS[0]:-}" ;;
     journal-add)    run_cmd "journal-add ${ARGS[*]}" ;;
+    journal-delete) run_cmd "journal-delete ${ARGS[0]:-}" ;;
     journal-perf)   run_cmd "journal-perf" ;;
     pnl)            run_cmd "pnl ${ARGS[0]:-}" ;;
     pnl-export)     run_cmd "pnl-export" ;;
@@ -183,12 +184,14 @@ case "$COMMAND" in
         echo "  check-alerts         Check if any alert triggered"
         echo "  learn [TOPIC]        Educational lessons"
         echo "  project [SYMBOL]     12-month DCA projection"
-        echo "  journal [COIN]       Show decision journal (optionally filter by coin)"
-        echo "  journal-add C A P [AMT] [note]  Log a buy/sell decision"
-        echo "             e.g.: journal-add ADA buy 0.262 100 \"oversold -49% SMA200\""
-        echo "  journal-perf         Journal entries vs current price (unrealised P&L)"
-        echo "  pnl [SYMBOL]         P&L summary from Binance trade history (FIFO, 90d)"
-        echo "  pnl-export           Export P&L to CSV for Koinly / CoinTracking"
+        echo "  journal [COIN]         Show decision journal (filter by COIN optional)"
+        echo "  journal-add COIN BUY/SELL PRICE [AMOUNT] [notes]"
+        echo "                         Log a buy or sell decision"
+        echo "                         e.g.: journal-add ADA buy 0.262 100 \"oversold -49% SMA200\""
+        echo "  journal-delete ID      Delete a journal entry by its id"
+        echo "  journal-perf           Journal performance vs current prices (unrealised P&L)"
+        echo "  pnl [SYMBOL]           P&L from Binance trade history (FIFO, 365 days)"
+        echo "  pnl-export             Export P&L to timestamped CSV for Koinly / CoinTracking"
         echo "  rebalance            Portfolio rebalancing suggestions"
         echo "  targets              Show target allocation"
         echo "  targets-set C% ...   Set targets: targets-set BTC 40 ETH 30 BNB 20 ADA 10"

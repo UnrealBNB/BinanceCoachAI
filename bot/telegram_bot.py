@@ -63,14 +63,16 @@ BOT_COMMANDS = [
     BotCommand("listings",    "New coin listings on Binance"),
     BotCommand("launchpool",  "Active launchpools & HODLer airdrops"),
     BotCommand("watchstatus", "Check if news watcher is active"),
-    BotCommand("journal",     "Show your decision journal"),
-    BotCommand("journalperf", "Journal P&L vs current prices"),
-    BotCommand("pnl",         "P&L summary (FIFO, 90 days)"),
-    BotCommand("pnlexport",   "Export P&L to CSV"),
-    BotCommand("rebalance",   "Portfolio rebalancing suggestions"),
-    BotCommand("targets",     "Show target allocation"),
-    BotCommand("targetsset",  "Set target allocation (e.g. BTC 40 ETH 30)"),
-    BotCommand("yield",       "Stablecoin yield optimizer"),
+    BotCommand("journal",       "Show your decision journal"),
+    BotCommand("journaladd",    "Log a decision (e.g. ADA buy 0.262 100 reason)"),
+    BotCommand("journaldelete", "Delete a journal entry by id"),
+    BotCommand("journalperf",   "Journal P&L vs current prices"),
+    BotCommand("pnl",           "P&L summary (FIFO, 365 days)"),
+    BotCommand("pnlexport",     "Export P&L to CSV and send as file"),
+    BotCommand("rebalance",     "Portfolio rebalancing suggestions"),
+    BotCommand("targets",       "Show target allocation"),
+    BotCommand("targetsset",    "Set target allocation (e.g. BTC 40 ETH 30)"),
+    BotCommand("yield",         "Stablecoin yield optimizer"),
 ]
 
 
@@ -703,6 +705,56 @@ def build_app(client: Spot, market: MarketData):
         coin_arg = context.args[0].upper() if context.args else None
         await _send(update, j.format_journal_html(coin=coin_arg))
 
+    async def journaladd_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Usage: /journaladd COIN BUY/SELL PRICE [AMOUNT] [notes...]"""
+        if not await auth(update): return
+        args = context.args
+        if not args or len(args) < 3:
+            await _send(update,
+                "❌ Usage: <code>/journaladd COIN BUY/SELL PRICE [AMOUNT] [notes...]</code>\n"
+                "Example: <code>/journaladd ADA buy 0.262 100 oversold -49% SMA200</code>"
+            )
+            return
+        from modules.journal import DecisionJournal
+        j = DecisionJournal(market=market)
+        coin_arg   = args[0]
+        action_arg = args[1]
+        try:
+            price_arg = float(args[2])
+        except ValueError:
+            await _send(update, f"❌ Invalid price: <code>{args[2]}</code>")
+            return
+        # Fix: is not None check — amount=0 is valid but falsy
+        try:
+            amount_arg = float(args[3]) if len(args) > 3 and _is_num_str(args[3]) else None
+        except (ValueError, IndexError):
+            amount_arg = None
+        notes_start = 4 if amount_arg is not None else 3
+        notes_arg   = " ".join(args[notes_start:]) if len(args) > notes_start else ""
+        try:
+            j.add_entry(coin_arg, action_arg, price_arg, amount_arg, notes_arg)
+            await _send(update,
+                f"✅ Logged: <b>{action_arg.upper()} {coin_arg.upper()}</b> @ ${price_arg:,.4f}"
+                + (f" (${amount_arg:,.2f})" if amount_arg is not None else "")
+                + (f"\n<i>{notes_arg}</i>" if notes_arg else "")
+            )
+        except ValueError as e:
+            await _send(update, f"❌ {e}")
+
+    async def journaldelete_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Usage: /journaldelete <id>"""
+        if not await auth(update): return
+        if not context.args or not context.args[0].isdigit():
+            await _send(update, "❌ Usage: <code>/journaldelete &lt;id&gt;</code>\nFind the id with /journal")
+            return
+        from modules.journal import DecisionJournal
+        j = DecisionJournal(market=market)
+        ok = j.delete_entry(int(context.args[0]))
+        if ok:
+            await _send(update, f"🗑️ Entry #{context.args[0]} deleted.")
+        else:
+            await _send(update, f"❌ No entry with id={context.args[0]}")
+
     async def journalperf_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not await auth(update): return
         await _send(update, "<i>Calculating journal performance...</i>")
@@ -710,8 +762,10 @@ def build_app(client: Spot, market: MarketData):
         j = DecisionJournal(market=market)
         await _send(update, j.format_performance_html())
 
-    app.add_handler(CommandHandler("journal",     journal_cmd))
-    app.add_handler(CommandHandler("journalperf", journalperf_cmd))
+    app.add_handler(CommandHandler("journal",       journal_cmd))
+    app.add_handler(CommandHandler("journaladd",    journaladd_cmd))
+    app.add_handler(CommandHandler("journaldelete", journaldelete_cmd))
+    app.add_handler(CommandHandler("journalperf",   journalperf_cmd))
 
     # ── P&L Calculator ───────────────────────────────────────────────────────
 
@@ -725,12 +779,22 @@ def build_app(client: Spot, market: MarketData):
 
     async def pnlexport_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not await auth(update): return
-        await _send(update, "<i>Generating P&amp;L export...</i>")
-        from modules.pnl import PnLCalculator, EXPORT_PATH
+        await _send(update, "<i>Generating P&amp;L export (365 days)...</i>")
+        from modules.pnl import PnLCalculator
         pnl_mod = PnLCalculator(client, market, portfolio_mod)
-        pnl_mod.export_csv()
-        await _send(update, f"✅ CSV exported to:\n<code>{EXPORT_PATH}</code>\n"
-                            "Import into Koinly or CoinTracking for full tax report.")
+        export_path = pnl_mod.export_csv()
+        if export_path and export_path.exists():
+            await update.message.reply_document(
+                document=open(export_path, "rb"),
+                filename=export_path.name,
+                caption=(
+                    "💰 P&L Export (FIFO, 365 days)\n"
+                    "Import into Koinly or CoinTracking for a full tax report.\n"
+                    "⚠️ Not tax advice — fees excluded."
+                )
+            )
+        else:
+            await _send(update, "❌ No trade history found to export.")
 
     app.add_handler(CommandHandler("pnl",       pnl_cmd))
     app.add_handler(CommandHandler("pnlexport", pnlexport_cmd))
@@ -741,21 +805,24 @@ def build_app(client: Spot, market: MarketData):
         if not await auth(update): return
         await _send(update, "<i>Analysing portfolio vs targets...</i>")
         from modules.rebalance import RebalanceAdvisor
-        rb = RebalanceAdvisor(portfolio_mod, market)
+        rb = RebalanceAdvisor(portfolio_mod)
         await _send(update, rb.format_rebalance_html())
 
     async def targets_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not await auth(update): return
         from modules.rebalance import RebalanceAdvisor
-        rb = RebalanceAdvisor(portfolio_mod, market)
+        rb = RebalanceAdvisor(portfolio_mod)
         await _send(update, rb.format_targets_html())
 
     async def targetsset_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not await auth(update): return
         # /targetsset BTC 40 ETH 30 BNB 20 ADA 10
         from modules.rebalance import RebalanceAdvisor
-        rb = RebalanceAdvisor(portfolio_mod, market)
+        rb = RebalanceAdvisor(portfolio_mod)
         args = context.args
+        if not args:
+            await _send(update, "❌ Usage: <code>/targetsset BTC 40 ETH 30 BNB 20 ADA 10</code>")
+            return
         allocations = {}
         i = 0
         while i < len(args) - 1:
@@ -767,14 +834,19 @@ def build_app(client: Spot, market: MarketData):
         if not allocations:
             await _send(update, "❌ Usage: <code>/targetsset BTC 40 ETH 30 BNB 20 ADA 10</code>")
             return
+        # Show what's being replaced before saving
+        old_targets = rb._load_targets()
         ok = rb.set_targets(allocations)
         if ok:
             lines = ["✅ <b>Target allocation saved:</b>"]
             for coin, pct in sorted(allocations.items(), key=lambda x: -x[1]):
                 lines.append(f"• <b>{coin}</b> — {pct:.1f}%")
+            if old_targets:
+                lines.append("\n<i>Previous targets were replaced.</i>")
             await _send(update, "\n".join(lines))
         else:
-            await _send(update, "❌ Targets must sum to 100%. Check your percentages.")
+            total = sum(allocations.values())
+            await _send(update, f"❌ Targets must sum to 100% (got {total:.1f}%). Check your numbers.")
 
     app.add_handler(CommandHandler("rebalance",  rebalance_cmd))
     app.add_handler(CommandHandler("targets",    targets_cmd))
@@ -788,6 +860,13 @@ def build_app(client: Spot, market: MarketData):
         from modules.yield_optimizer import YieldOptimizer
         yo = YieldOptimizer(client, portfolio_mod)
         await _send(update, yo.format_yield_html())
+
+    def _is_num_str(s: str) -> bool:
+        try:
+            float(s)
+            return True
+        except (ValueError, TypeError):
+            return False
 
     app.add_handler(CommandHandler("yield", yield_cmd))
 

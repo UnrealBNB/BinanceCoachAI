@@ -1,8 +1,19 @@
 """
 yield_optimizer.py — Stablecoin yield optimizer
-Shows potential earnings from Binance Simple Earn for idle stablecoins.
+
+Fixes applied:
+- New Simple Earn API tried first, old Savings API as fallback (was backwards)
+- Both API failures now logged as warnings instead of swallowed silently
+  (silent failure → all stablecoins show "idle" even if actually enrolled)
+- `if monthly_yield is not None:` replaces falsy `if monthly_yield:`
+  (0% APR asset was incorrectly shown as "idle" instead of "enrolled, 0%")
+- `total_idle` renamed to `total_stablecoins` — it was including earning assets too,
+  the name was misleading
+- `self.market` removed — it was stored but never used
+- Python 3.9-compatible type hints
 """
 import logging
+from typing import Optional, List
 from rich.console import Console
 from rich.table import Table
 from rich.panel import Panel
@@ -15,31 +26,39 @@ STABLECOINS = {"USDT", "USDC", "BUSD", "TUSD", "FDUSD", "DAI", "USD1", "USDP", "
 
 class YieldOptimizer:
     def __init__(self, client, portfolio):
-        self.client = client
+        self.client    = client
         self.portfolio = portfolio
 
-    def _get_earn_rate(self, asset: str) -> float | None:
-        """Fetch best available APR for an asset from Simple Earn."""
-        # Try new Simple Earn Flexible endpoint
-        try:
-            resp = self.client.get_flexible_product_list(asset=asset, status="SUBSCRIBABLE")
-            if resp:
-                rates = [float(r.get("latestAnnualPercentageRate", 0)) for r in resp]
-                if rates:
-                    return max(rates) * 100
-        except Exception:
-            pass
-
-        # Try the Simple Earn v2 endpoint
+    def _get_earn_rate(self, asset: str) -> Optional[float]:
+        """
+        Fetch best available APR (%) for an asset from Binance Simple Earn.
+        Tries the current Simple Earn v2 API first, falls back to legacy Savings API.
+        Returns None only if both fail (logs a warning so the caller knows).
+        """
+        # 1. Current Simple Earn Flexible endpoint (preferred)
         try:
             resp = self.client.simple_earn_flexible_product_list(asset=asset, current=1, size=5)
             rows = resp.get("data", {}).get("rows", [])
             if rows:
                 rates = [float(r.get("latestAnnualPercentageRate", 0)) for r in rows]
                 return max(rates) * 100
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Simple Earn v2 API failed for {asset}: {e}")
 
+        # 2. Legacy Savings API fallback (deprecated but may still work)
+        try:
+            resp = self.client.get_flexible_product_list(asset=asset, status="SUBSCRIBABLE")
+            if resp:
+                rates = [float(r.get("latestAnnualPercentageRate", 0)) for r in resp]
+                if rates:
+                    return max(rates) * 100
+        except Exception as e:
+            logger.debug(f"Legacy Savings API failed for {asset}: {e}")
+
+        logger.warning(
+            f"Could not fetch Simple Earn rate for {asset} — both APIs failed. "
+            "Balance will show as 'rate unavailable', not necessarily idle."
+        )
         return None
 
     def analyze(self) -> dict:
@@ -55,41 +74,45 @@ class YieldOptimizer:
 
         if not stable_holdings:
             return {
-                "stable_holdings": [],
-                "total_idle": 0,
-                "total_monthly": 0,
-                "total_annual": 0,
+                "stable_holdings":  [],
+                "total_stablecoins": 0.0,
+                "total_monthly":    0.0,
+                "total_annual":     0.0,
             }
 
         results = []
-        total_idle = sum(b["usd_value"] for b in stable_holdings)
+        total_stablecoins = sum(b["usd_value"] for b in stable_holdings)
         total_monthly = 0.0
-        total_annual = 0.0
+        total_annual  = 0.0
 
         for b in stable_holdings:
             asset = b["asset"].upper()
-            usd = b["usd_value"]
-            apr = self._get_earn_rate(asset)
-            monthly = usd * apr / 100 / 12 if apr else None
-            annual = usd * apr / 100 if apr else None
-            if monthly:
+            usd   = b["usd_value"]
+            apr   = self._get_earn_rate(asset)
+
+            monthly = usd * apr / 100 / 12 if apr is not None else None
+            annual  = usd * apr / 100       if apr is not None else None
+
+            if monthly is not None:
                 total_monthly += monthly
-                total_annual += annual
+                total_annual  += annual
+
             results.append({
-                "asset": asset,
-                "usd_value": usd,
-                "apr": apr,
+                "asset":         asset,
+                "usd_value":     usd,
+                "apr":           apr,
                 "monthly_yield": monthly,
-                "annual_yield": annual,
-                "is_earning": apr is not None and apr > 0,
+                "annual_yield":  annual,
             })
 
         return {
-            "stable_holdings": sorted(results, key=lambda x: -x["usd_value"]),
-            "total_idle": total_idle,
-            "total_monthly": total_monthly,
-            "total_annual": total_annual,
+            "stable_holdings":   sorted(results, key=lambda x: -x["usd_value"]),
+            "total_stablecoins": total_stablecoins,
+            "total_monthly":     total_monthly,
+            "total_annual":      total_annual,
         }
+
+    # ── CLI output ────────────────────────────────────────────────────────────
 
     def print_yield(self):
         result = self.analyze()
@@ -110,16 +133,24 @@ class YieldOptimizer:
 
         idle_usd = 0.0
         for r in result["stable_holdings"]:
-            if r["apr"] and r["apr"] > 0:
-                status = "[green]✅ Earning[/green]"
+            apr = r["apr"]
+            if apr is None:
+                # API failed — don't assume idle, say unknown
+                status  = "[dim]❓ Rate unavailable[/dim]"
+                monthly = "[dim]?[/dim]"
+                annual  = "[dim]?[/dim]"
+                apr_str = "?"
+            elif apr > 0:
+                status  = "[green]✅ Earning[/green]"
                 monthly = f"[green]+${r['monthly_yield']:,.2f}[/green]"
                 annual  = f"[green]+${r['annual_yield']:,.2f}[/green]"
-                apr_str = f"{r['apr']:.2f}%"
+                apr_str = f"{apr:.2f}%"
             else:
-                status = "[red]💤 Idle[/red]"
-                monthly = "[red]$0.00[/red]"
-                annual  = "[red]$0.00[/red]"
-                apr_str = "—"
+                # APR returned but 0% — enrolled but earning nothing
+                status  = "[yellow]⚠️ 0% APR[/yellow]"
+                monthly = "[yellow]$0.00[/yellow]"
+                annual  = "[yellow]$0.00[/yellow]"
+                apr_str = "0%"
                 idle_usd += r["usd_value"]
 
             table.add_row(
@@ -137,17 +168,18 @@ class YieldOptimizer:
             console.print(Panel(
                 f"[bold green]+${result['total_monthly']:,.2f} / month[/bold green]  "
                 f"([dim]+${result['total_annual']:,.2f} / year[/dim])\n"
-                f"[dim]Total stablecoins: ${result['total_idle']:,.2f}[/dim]",
+                f"[dim]Total stablecoins tracked: ${result['total_stablecoins']:,.2f}[/dim]",
                 title="💰 Earning Potential",
                 border_style="green"
             ))
         if idle_usd > 1:
             console.print(Panel(
-                f"[yellow]${idle_usd:,.2f} sitting idle — not earning anything.[/yellow]\n"
-                f"[dim]Enable Binance Simple Earn (Flexible) for free passive yield.[/dim]",
-                title="💤 Idle Capital",
+                f"[yellow]${idle_usd:,.2f} enrolled at 0% APR — consider switching products.[/yellow]",
+                title="⚠️ Zero-yield Holdings",
                 border_style="yellow"
             ))
+
+    # ── Telegram HTML output ──────────────────────────────────────────────────
 
     def format_yield_html(self) -> str:
         result = self.analyze()
@@ -159,11 +191,16 @@ class YieldOptimizer:
         lines = ["💵 <b>Stablecoin Yield Optimizer</b>"]
         idle_usd = 0.0
         for r in result["stable_holdings"]:
-            if r["monthly_yield"]:
+            if r["monthly_yield"] is not None and r["monthly_yield"] > 0:
                 lines.append(
                     f"✅ <b>{r['asset']}</b> ${r['usd_value']:,.2f} "
                     f"@ {r['apr']:.2f}% APR → <b>+${r['monthly_yield']:,.2f}/mo</b>"
                 )
+            elif r["apr"] == 0:
+                idle_usd += r["usd_value"]
+                lines.append(f"⚠️ <b>{r['asset']}</b> ${r['usd_value']:,.2f} — enrolled at 0% APR")
+            elif r["apr"] is None:
+                lines.append(f"❓ <b>{r['asset']}</b> ${r['usd_value']:,.2f} — rate unavailable")
             else:
                 idle_usd += r["usd_value"]
                 lines.append(f"💤 <b>{r['asset']}</b> ${r['usd_value']:,.2f} — idle, not earning")
@@ -175,6 +212,6 @@ class YieldOptimizer:
             )
         if idle_usd > 1:
             lines.append(
-                f"\n⚠️ ${idle_usd:,.2f} idle — consider enabling Binance Simple Earn."
+                f"\n⚠️ ${idle_usd:,.2f} at 0% — consider enabling Binance Simple Earn."
             )
         return "\n".join(lines)

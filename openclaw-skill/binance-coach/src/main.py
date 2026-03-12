@@ -699,7 +699,7 @@ def _dispatch_command(cmd_str, client, market, portfolio, dca, alert_mgr, behavi
         j.print_journal(coin=coin_filter)
 
     elif parts[0] == "journal-add":
-        # journal-add COIN BUY/SELL PRICE [AMOUNT_USD] [notes...]
+        # Usage: journal-add COIN BUY/SELL PRICE [AMOUNT_USD] [notes...]
         if len(parts) < 4:
             console.print("[red]Usage: journal-add COIN BUY/SELL PRICE [AMOUNT_USD] [notes...][/red]")
             console.print("[dim]Example: journal-add ADA buy 0.262 100 \"oversold -49% SMA200\"[/dim]")
@@ -708,11 +708,29 @@ def _dispatch_command(cmd_str, client, market, portfolio, dca, alert_mgr, behavi
             j = DecisionJournal(market=market)
             coin_arg   = parts[1]
             action_arg = parts[2]
-            price_arg  = float(parts[3])
+            try:
+                price_arg = float(parts[3])
+            except ValueError:
+                console.print(f"[red]Invalid price: {parts[3]}[/red]")
+                return
+            # Fix: use `is not None` check — float(0) is falsy, would wrongly shift notes_start
             amount_arg = float(parts[4]) if len(parts) > 4 and _is_num(parts[4]) else None
-            notes_start = 5 if amount_arg else 4
-            notes_arg  = " ".join(parts[notes_start:]) if len(parts) > notes_start else ""
-            j.add_entry(coin_arg, action_arg, price_arg, amount_arg, notes_arg)
+            notes_start = 5 if amount_arg is not None else 4
+            notes_arg   = " ".join(parts[notes_start:]) if len(parts) > notes_start else ""
+            try:
+                j.add_entry(coin_arg, action_arg, price_arg, amount_arg, notes_arg)
+            except ValueError as e:
+                console.print(f"[red]❌ {e}[/red]")
+
+    elif parts[0] == "journal-delete":
+        # journal-delete <id>
+        if len(parts) < 2 or not parts[1].isdigit():
+            console.print("[red]Usage: journal-delete <id>[/red]")
+            console.print("[dim]Find the id with: journal[/dim]")
+        else:
+            from modules.journal import DecisionJournal
+            j = DecisionJournal(market=market)
+            j.delete_entry(int(parts[1]))
 
     elif parts[0] == "journal-perf":
         from modules.journal import DecisionJournal
@@ -734,18 +752,18 @@ def _dispatch_command(cmd_str, client, market, portfolio, dca, alert_mgr, behavi
     # ── Rebalancing ─────────────────────────────────────────────────────────
     elif parts[0] == "rebalance":
         from modules.rebalance import RebalanceAdvisor
-        rb = RebalanceAdvisor(portfolio, market)
+        rb = RebalanceAdvisor(portfolio)
         rb.print_rebalance()
 
     elif parts[0] == "targets":
         from modules.rebalance import RebalanceAdvisor
-        rb = RebalanceAdvisor(portfolio, market)
+        rb = RebalanceAdvisor(portfolio)
         rb.print_targets()
 
     elif parts[0] == "targets-set":
         # targets-set BTC 40 ETH 30 BNB 20 ADA 10
         from modules.rebalance import RebalanceAdvisor
-        rb = RebalanceAdvisor(portfolio, market)
+        rb = RebalanceAdvisor(portfolio)
         alloc_parts = parts[1:]
         allocations = {}
         i = 0

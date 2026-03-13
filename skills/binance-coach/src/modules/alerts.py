@@ -18,22 +18,20 @@ DB_PATH = str(Path(__file__).parent.parent / "data" / "alerts.db")
 
 
 def init_alerts_db():
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS alerts (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            symbol TEXT,
-            condition TEXT,
-            threshold REAL,
-            triggered INTEGER DEFAULT 0,
-            created_at TEXT,
-            triggered_at TEXT,
-            notes TEXT
-        )
-    """)
-    conn.commit()
-    conn.close()
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS alerts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                symbol TEXT,
+                condition TEXT,
+                threshold REAL,
+                triggered INTEGER DEFAULT 0,
+                created_at TEXT,
+                triggered_at TEXT,
+                notes TEXT
+            )
+        """)
+        conn.commit()
 
 
 class AlertManager:
@@ -49,23 +47,19 @@ class AlertManager:
         Add a price alert.
         condition: 'above' | 'below' | 'rsi_above' | 'rsi_below'
         """
-        conn = sqlite3.connect(DB_PATH)
-        c = conn.cursor()
-        c.execute("""
-            INSERT INTO alerts (symbol, condition, threshold, created_at, notes)
-            VALUES (?, ?, ?, ?, ?)
-        """, (symbol, condition, threshold, datetime.utcnow().isoformat(), notes))
-        conn.commit()
-        conn.close()
-        # Note: confirmation printed by caller (_dispatch_command / CLI)
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.execute("""
+                INSERT INTO alerts (symbol, condition, threshold, created_at, notes)
+                VALUES (?, ?, ?, ?, ?)
+            """, (symbol, condition, threshold, datetime.utcnow().isoformat(), notes))
+            conn.commit()
 
-    def check_alerts(self) -> list[dict]:
+    def check_alerts(self) -> list:
         """Check all untriggered alerts and fire any that match."""
-        conn = sqlite3.connect(DB_PATH)
-        c = conn.cursor()
-        c.execute("SELECT id, symbol, condition, threshold, notes FROM alerts WHERE triggered=0")
-        rows = c.fetchall()
-        conn.close()
+        with sqlite3.connect(DB_PATH) as conn:
+            rows = conn.execute(
+                "SELECT id, symbol, condition, threshold, notes FROM alerts WHERE triggered=0"
+            ).fetchall()
 
         fired = []
         for alert_id, symbol, condition, threshold, notes in rows:
@@ -100,8 +94,6 @@ class AlertManager:
                         "context": context_msg,
                         "notes": notes,
                     })
-                    # Note: telegram_notify is async — called externally by the bot
-                    # after check_alerts() returns, so we don't call it here directly.
 
             except Exception as exc:
                 logger.warning("Alert check failed for %s: %s", symbol, exc)
@@ -116,7 +108,6 @@ class AlertManager:
         trend = ctx["trend"]
         vs_sma200 = ctx["vs_sma200_pct"]
 
-        # Header
         emoji = "📈" if condition == "above" else "📉"
         msg = f"{emoji} *{symbol} Alert Triggered!*\n\n"
 
@@ -157,20 +148,19 @@ class AlertManager:
         return msg
 
     def _mark_triggered(self, alert_id: int):
-        conn = sqlite3.connect(DB_PATH)
-        c = conn.cursor()
-        c.execute("UPDATE alerts SET triggered=1, triggered_at=? WHERE id=?",
-                  (datetime.utcnow().isoformat(), alert_id))
-        conn.commit()
-        conn.close()
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.execute(
+                "UPDATE alerts SET triggered=1, triggered_at=? WHERE id=?",
+                (datetime.utcnow().isoformat(), alert_id)
+            )
+            conn.commit()
 
     def list_alerts(self):
         """List all active alerts."""
-        conn = sqlite3.connect(DB_PATH)
-        c = conn.cursor()
-        c.execute("SELECT symbol, condition, threshold, created_at, notes FROM alerts WHERE triggered=0")
-        rows = c.fetchall()
-        conn.close()
+        with sqlite3.connect(DB_PATH) as conn:
+            rows = conn.execute(
+                "SELECT symbol, condition, threshold, created_at, notes FROM alerts WHERE triggered=0"
+            ).fetchall()
 
         if not rows:
             console.print(f"[yellow]{t('alert.none')}[/yellow]")

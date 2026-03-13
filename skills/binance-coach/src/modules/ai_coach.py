@@ -325,8 +325,8 @@ If you don't know something specific, say so. Never invent price data."""
 - Trend: {mkt.get('trend', '?')}
 - vs 200-day SMA: {mkt.get('vs_sma200_pct', 0):+.1f}%
 - Fear & Greed: {fg_val} ({fg_lbl})""")
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("ai_coach: market context fetch failed for coin — %s", e)
 
         context_block = "\n\n".join(blocks)
         if context_block:

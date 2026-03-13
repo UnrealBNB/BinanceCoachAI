@@ -38,13 +38,19 @@ class HistoryAnalyzer:
                 "pct":       pct,
             })
 
-        total1 = snap1[next(iter(snap1))]["portfolio_total"] if snap1 else 0
-        total2 = snap2[next(iter(snap2))]["portfolio_total"] if snap2 else 0
+        def _first(snap, field, default=None):
+            """Safely get a field from the first coin row of a snapshot."""
+            try:
+                return snap[next(iter(snap))][field] if snap else default
+            except (StopIteration, KeyError):
+                return default
+
+        total1       = _first(snap1, "portfolio_total", 0) or 0
+        total2       = _first(snap2, "portfolio_total", 0) or 0
         total_change = total2 - total1
         total_pct    = (total_change / total1 * 100) if total1 > 0 else None
-
-        hs1 = snap1[next(iter(snap1))]["health_score"] if snap1 else None
-        hs2 = snap2[next(iter(snap2))]["health_score"] if snap2 else None
+        hs1          = _first(snap1, "health_score")
+        hs2          = _first(snap2, "health_score")
 
         return {
             "date_old":      date1,

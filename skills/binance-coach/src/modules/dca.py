@@ -244,8 +244,9 @@ class DCAAdvisor:
                         weekly_amount=rec["suggested_weekly_usd"],
                         recommendation="; ".join(rec.get("rationale", [])),
                     )
-                except Exception:
-                    pass
+                except Exception as e:
+                    import logging as _dca_log
+                    _dca_log.getLogger(__name__).debug("DCA DB save failed for %s: %s", rec["symbol"], e)
             multiplier_str = f"×{rec['multiplier']:.2f}"
             if rec['multiplier'] > 1.3:
                 multiplier_str = f"[green]{multiplier_str}[/green]"

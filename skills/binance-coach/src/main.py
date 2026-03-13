@@ -502,9 +502,14 @@ def _dispatch_command(cmd_str, client, market, portfolio, dca, alert_mgr, behavi
         console.print()
         try:
             balances = portfolio.get_balances()
-            health = portfolio.calculate_health_score(balances)
+            health   = portfolio.calculate_health_score(balances)
             portfolio.print_portfolio_table(balances, health)
-            portfolio.save_snapshot(balances, health)  # auto-save to coach.db
+            fg = None
+            try:
+                fg = market.get_fear_greed()
+            except Exception:
+                pass
+            portfolio.save_snapshot(balances, health, fg=fg)  # auto-save to coach.db
         except Exception as e:
             msg = str(e)
             if "401" in msg or "Invalid API-key" in msg:
@@ -839,8 +844,16 @@ def _dispatch_command(cmd_str, client, market, portfolio, dca, alert_mgr, behavi
         console.print("locally in coach.db. Your data never leaves your machine.\n")
         console.print("[yellow]Do you want to import your Binance order history? (yes/no)[/yellow] ", end="")
         try:
-            answer = input("").strip().lower()
-        except Exception:
+            import sys
+            if sys.stdin.isatty():
+                answer = input("").strip().lower()
+            else:
+                # Non-interactive mode (--command flag) — require explicit opt-in via env var
+                answer = os.getenv("BC_IMPORT_ORDERS_CONFIRM", "no").strip().lower()
+                if answer != "yes":
+                    console.print("\n[dim]Non-interactive mode: set BC_IMPORT_ORDERS_CONFIRM=yes to auto-confirm.[/dim]")
+        except Exception as e:
+            logger.debug("import-orders: could not read stdin — %s", e)
             answer = "no"
         if answer not in ["yes", "y", "ja"]:
             console.print("[dim]Import cancelled.[/dim]")

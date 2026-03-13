@@ -277,13 +277,20 @@ class CoachDB:
 
     # ── Market History ────────────────────────────────────────────────────────
 
-    def save_market_history(self, date: str, fg_score: int, fg_label: str,
+    def save_market_history(self, date: str, fg_score, fg_label,
                              portfolio_total: float, health_score: int, health_grade: str):
+        """fg_score/fg_label may be None if F&G wasn't fetched this run."""
         with sqlite3.connect(DB_PATH) as conn:
             conn.execute("""
-                INSERT OR REPLACE INTO market_history
+                INSERT INTO market_history
                     (date, fg_score, fg_label, portfolio_total, health_score, health_grade)
                 VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(date) DO UPDATE SET
+                    portfolio_total = excluded.portfolio_total,
+                    health_score    = excluded.health_score,
+                    health_grade    = excluded.health_grade,
+                    fg_score        = COALESCE(excluded.fg_score, market_history.fg_score),
+                    fg_label        = COALESCE(excluded.fg_label, market_history.fg_label)
             """, (date, fg_score, fg_label, portfolio_total, health_score, health_grade))
             conn.commit()
 

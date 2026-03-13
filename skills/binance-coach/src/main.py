@@ -504,6 +504,7 @@ def _dispatch_command(cmd_str, client, market, portfolio, dca, alert_mgr, behavi
             balances = portfolio.get_balances()
             health = portfolio.calculate_health_score(balances)
             portfolio.print_portfolio_table(balances, health)
+            portfolio.save_snapshot(balances, health)  # auto-save to coach.db
         except Exception as e:
             msg = str(e)
             if "401" in msg or "Invalid API-key" in msg:
@@ -740,6 +741,144 @@ def _dispatch_command(cmd_str, client, market, portfolio, dca, alert_mgr, behavi
         from modules.journal import DecisionJournal
         j = DecisionJournal(market=market)
         j.print_performance()
+
+    # ── Snapshot ────────────────────────────────────────────────────────────
+    elif parts[0] == "snapshot":
+        try:
+            balances = portfolio.get_balances()
+            health   = portfolio.calculate_health_score(balances)
+            from modules.coach_db import CoachDB
+            from datetime import datetime
+            db    = CoachDB()
+            today = datetime.now().strftime("%Y-%m-%d")
+            if db.has_snapshot_for(today):
+                console.print(f"[yellow]📸 Snapshot already saved for today ({today}).[/yellow]")
+            else:
+                portfolio.save_snapshot(balances, health)
+                console.print(f"[green]📸 Portfolio snapshot saved for {today} — ${health['total_usd']:,.2f}[/green]")
+        except Exception as e:
+            console.print(f"[red]Snapshot failed: {e}[/red]")
+
+    # ── History ─────────────────────────────────────────────────────────────
+    elif parts[0] == "history":
+        from modules.history import HistoryAnalyzer
+        from modules.coach_db import CoachDB
+        days_arg = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 7
+        ha = HistoryAnalyzer(CoachDB(), market)
+        if days_arg == 1 or (len(parts) > 1 and parts[1] in ["yesterday", "vs"]):
+            ha.print_today_vs_yesterday()
+        else:
+            ha.print_today_vs_yesterday()
+            console.print()
+            ha.print_history(days=days_arg)
+
+    # ── DCA History ──────────────────────────────────────────────────────────
+    elif parts[0] == "dca-history":
+        from modules.coach_db import CoachDB
+        from rich.table import Table as RTable
+        symbol_filter = parts[1].upper() if len(parts) > 1 else None
+        db   = CoachDB()
+        rows = db.get_dca_history(symbol=symbol_filter, limit=20)
+        if not rows:
+            console.print("[yellow]No DCA analysis history yet. Run 'bc.sh dca' first.[/yellow]")
+        else:
+            t2 = RTable(title="📐 DCA Analysis History", border_style="magenta")
+            t2.add_column("Date",       width=12)
+            t2.add_column("Symbol",     width=10)
+            t2.add_column("Price",      justify="right", width=12)
+            t2.add_column("RSI",        justify="right", width=7)
+            t2.add_column("F&G",        justify="right", width=6)
+            t2.add_column("Multiplier", justify="right", width=10)
+            t2.add_column("Weekly $",   justify="right", width=10)
+            for r in rows:
+                mc = "green" if r["multiplier"] >= 1.1 else ("red" if r["multiplier"] < 0.9 else "white")
+                t2.add_row(
+                    r["date"], r["symbol"],
+                    f"${r['price']:,.4f}" if r["price"] else "—",
+                    f"{r['rsi']:.1f}" if r["rsi"] else "—",
+                    str(r["fg_score"]) if r["fg_score"] else "—",
+                    f"[{mc}]×{r['multiplier']:.2f}[/{mc}]",
+                    f"${r['weekly_amount']:,.2f}" if r["weekly_amount"] else "—",
+                )
+            console.print(t2)
+
+    # ── Confirm DCA action ───────────────────────────────────────────────────
+    elif parts[0] == "confirm":
+        # confirm <analysis_id> yes|no [amount] [notes...]
+        from modules.coach_db import CoachDB
+        if len(parts) < 3:
+            console.print("[red]Usage: confirm <id> yes|no [amount] [notes][/red]")
+        else:
+            try:
+                analysis_id  = int(parts[1])
+                decision     = parts[2].lower()
+                amount       = float(parts[3]) if len(parts) > 3 and parts[3].replace(".","").isdigit() else None
+                notes        = " ".join(parts[4:]) if len(parts) > 4 else ""
+                action_type  = "dca_confirmed" if decision in ["yes","y","ja"] else "dca_skipped"
+                db = CoachDB()
+                # Look up symbol from analysis
+                hist = db.get_dca_history(limit=100)
+                rec  = next((r for r in hist if r["id"] == analysis_id), None)
+                symbol = rec["symbol"] if rec else "UNKNOWN"
+                db.save_user_action(analysis_id, symbol, action_type, amount, notes)
+                emoji = "✅" if action_type == "dca_confirmed" else "⏭️"
+                console.print(f"{emoji} Logged: {action_type} for analysis #{analysis_id} ({symbol})"
+                               + (f" — ${amount:,.2f}" if amount else ""))
+            except Exception as e:
+                console.print(f"[red]Confirm failed: {e}[/red]")
+
+    # ── Import orders from Binance ───────────────────────────────────────────
+    elif parts[0] == "import-orders":
+        from modules.coach_db import CoachDB
+        from datetime import datetime
+        db = CoachDB()
+        existing = db.get_order_count()
+        console.print(f"\n[bold]📥 Binance Order History Import[/bold]")
+        console.print(f"[dim]Orders already in DB: {existing}[/dim]\n")
+        console.print("This will fetch your filled order history from Binance and store it")
+        console.print("locally in coach.db. Your data never leaves your machine.\n")
+        console.print("[yellow]Do you want to import your Binance order history? (yes/no)[/yellow] ", end="")
+        try:
+            answer = input("").strip().lower()
+        except Exception:
+            answer = "no"
+        if answer not in ["yes", "y", "ja"]:
+            console.print("[dim]Import cancelled.[/dim]")
+        else:
+            all_assets = ["BTC","ETH","ADA","DOGE","SHIB","ANKR","FLOKI","BNB","SCR",
+                          "MONKY","TRUMP","NIGHT","OPN","SOL","XRP","AVAX","DOT","LINK","MATIC"]
+            imported = 0
+            skipped  = 0
+            for asset in all_assets:
+                for quote in ["USDT","USDC"]:
+                    try:
+                        orders = client.get_orders(symbol=asset+quote, limit=500)
+                        filled = [o for o in (orders or []) if o["status"] == "FILLED"]
+                        for o in filled:
+                            price    = float(o["price"]) if float(o["price"]) > 0 else (
+                                float(o.get("cummulativeQuoteQty",0)) / float(o["executedQty"])
+                                if float(o["executedQty"]) > 0 else 0
+                            )
+                            spent    = float(o.get("cummulativeQuoteQty", 0))
+                            ts       = o["time"]
+                            date_str = datetime.fromtimestamp(ts/1000).strftime("%Y-%m-%d")
+                            db.save_order(
+                                symbol   = asset + quote,
+                                side     = o["side"],
+                                price    = price,
+                                qty      = float(o["executedQty"]),
+                                spent_quote = spent,
+                                date     = date_str,
+                                timestamp= ts,
+                                source   = "binance_api",
+                                order_id = str(o["orderId"]),
+                            )
+                            imported += 1
+                    except Exception:
+                        skipped += 1
+            console.print(f"[green]✅ Imported {imported} orders into coach.db[/green]")
+            if skipped:
+                console.print(f"[dim]{skipped} symbols skipped (no history or error)[/dim]")
 
     # ── P&L Calculator ──────────────────────────────────────────────────────
     elif parts[0] == "pnl":

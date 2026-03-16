@@ -6,7 +6,10 @@ BinanceCoach is an AI assistant that connects to your Binance account (read-only
 
 **Built for the [OpenClaw AI Assistant Build Campaign 2026](https://binance.com/en/survey/c707e12435d44eaba19cdbc6bbe6f21d).**
 
-> ⚠️ **SCAM WARNING:** BinanceCoachAI is **NOT a token**. There is no cryptocurrency, coin, or token associated with this project — now or ever. If someone tries to sell you a "BinanceCoach token" or similar, it's a scam. This is free, open-source software. Nothing more.
+> ⚠️ **IMPORTANT DISCLAIMER:**
+> - **NOT A TOKEN:** BinanceCoachAI is **not** a cryptocurrency, coin, or token. There is no token associated with this project — now or ever. If someone tries to sell you a "BinanceCoach token," it's a scam.
+> - **NOT A BINANCE PROJECT:** This is an independent, community-built tool. It is **not** affiliated with, endorsed by, or officially connected to Binance in any way. "Binance" in the name refers only to the exchange API it connects to.
+> - **VOLUNTARY & OPEN-SOURCE:** This project is free, open-source software built by [@UnrealBNB](https://twitter.com/UnrealBNB) as a personal project for the OpenClaw AI competition. No company, no investors, no roadmap — just code.
 
 ---
 

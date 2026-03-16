@@ -23,7 +23,7 @@ from modules.coach_db  import CoachDB
 api_key    = os.getenv("BINANCE_API_KEY", "")
 api_secret = os.getenv("BINANCE_API_SECRET", "")
 tg_token   = os.getenv("TELEGRAM_BOT_TOKEN", "")
-tg_chat    = os.getenv("TELEGRAM_USER_ID", "6248861512")
+tg_chat    = os.getenv("TELEGRAM_USER_ID", "")
 budget     = float(os.getenv("DCA_BUDGET_MONTHLY", "400"))
 risk       = os.getenv("RISK_PROFILE", "moderate")
 

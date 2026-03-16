@@ -12,7 +12,7 @@ if [ -f "$ENV_FILE" ]; then
 fi
 
 TG_TOKEN="${TELEGRAM_BOT_TOKEN:-}"
-TG_CHAT="${TELEGRAM_USER_ID:-6248861512}"
+TG_CHAT="${TELEGRAM_USER_ID:-}"
 HOUR=$(date +%H)
 SESSION=$([ "$HOUR" -lt 15 ] && echo "🌅 Morning" || echo "🌆 Evening")
 DATE=$(date '+%Y-%m-%d %H:%M')

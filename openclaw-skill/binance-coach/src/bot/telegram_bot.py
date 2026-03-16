@@ -357,23 +357,18 @@ def build_app(client: Spot, market: MarketData):
 
     async def alerts_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not await auth(update): return
-        import sqlite3
-        from pathlib import Path
-        db   = str(Path(__file__).parent.parent / "data" / "alerts.db")
-        conn = sqlite3.connect(db)
-        rows = conn.execute(
-            "SELECT symbol, condition, threshold, created_at, notes FROM alerts WHERE triggered=0"
-        ).fetchall()
-        conn.close()
-        if not rows:
+        alerts = alert_mgr.db.get_active_alerts()
+        if not alerts:
             await _send(update, t("alert.none"))
             return
         lines = [bold(t("alert.title") + ":"), ""]
-        for sym, cond, thresh, created_at, notes in rows:
-            line = "• " + code(sym) + " " + e(cond) + " " + code(str(thresh))
-            if notes:
-                line += " — " + italic(e(notes))
-            line += " " + italic("(set " + e(created_at[:10]) + ")")
+        for alert in alerts:
+            created_at = alert.get("created_at", "") or ""
+            line = "• " + code(alert["symbol"]) + " " + e(alert["condition"]) + " " + code(str(alert["threshold"]))
+            if alert["notes"]:
+                line += " — " + italic(e(alert["notes"]))
+            if created_at:
+                line += " " + italic("(set " + e(created_at[:10]) + ")")
             lines.append(line)
         await _send(update, "\n".join(lines))
 
@@ -771,7 +766,7 @@ def build_app(client: Spot, market: MarketData):
 
     async def pnl_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not await auth(update): return
-        await _send(update, "<i>Fetching trade history from Binance (90 days)...</i>")
+        await _send(update, "<i>Fetching trade history from Binance (365 days)...</i>")
         from modules.pnl import PnLCalculator
         pnl_mod = PnLCalculator(client, market, portfolio_mod)
         sym = context.args[0].upper() if context.args else None

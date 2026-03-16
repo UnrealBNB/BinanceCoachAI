@@ -1,99 +1,89 @@
 """
 behavior.py — Behavioral bias detector & coaching engine
 Analyzes trade history for emotional trading patterns
+Uses coach.db for all data storage (consolidated database).
 """
 
-import sqlite3
-from pathlib import Path
+import logging
 from datetime import datetime, timedelta
 from binance.spot import Spot
 from rich.console import Console
 from rich.panel import Panel
 from modules.i18n import t
+from modules.coach_db import CoachDB
 
+logger  = logging.getLogger(__name__)
 console = Console()
-
-DB_PATH = str(Path(__file__).parent.parent / "data" / "behavior.db")
-
-
-def init_db():
-    """Initialize the behavior tracking database."""
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS trades (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            symbol TEXT,
-            side TEXT,
-            price REAL,
-            qty REAL,
-            time INTEGER,
-            order_id TEXT UNIQUE
-        )
-    """)
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS streaks (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            streak_type TEXT,
-            start_date TEXT,
-            count INTEGER,
-            last_updated TEXT
-        )
-    """)
-    conn.commit()
-    conn.close()
 
 
 class BehaviorCoach:
     """Detects emotional trading patterns and coaches users."""
 
-    def __init__(self, client: Spot, market):
-        self.client = client
-        self.market = market
-        init_db()
+    def __init__(self, client: Spot, market, journal=None):
+        self.client  = client
+        self.market  = market
+        self.journal = journal  # Optional DecisionJournal for fallback
+        self.db      = CoachDB()
 
-    def sync_trades(self, symbols: list[str], days: int = 30):
-        """Pull recent trade history from Binance into local DB."""
-        conn = sqlite3.connect(DB_PATH)
-        c = conn.cursor()
+    def sync_trades(self, symbols: list, days: int = 30):
+        """Pull recent trade history from Binance into coach.db, with journal fallback."""
         cutoff = int((datetime.utcnow() - timedelta(days=days)).timestamp() * 1000)
+        api_trade_count = 0
 
         for symbol in symbols:
             try:
-                trades = self.client.my_trades(symbol=symbol, limit=500)
+                trades = self.client.my_trades(symbol=symbol, limit=500) or []
                 for trade in trades:
                     if trade["time"] < cutoff:
                         continue
-                    c.execute("""
-                        INSERT OR IGNORE INTO trades (symbol, side, price, qty, time, order_id)
-                        VALUES (?, ?, ?, ?, ?, ?)
-                    """, (
-                        trade["symbol"],
-                        "BUY" if trade["isBuyer"] else "SELL",
-                        float(trade["price"]),
-                        float(trade["qty"]),
-                        trade["time"],
-                        trade["id"]
-                    ))
+                    self.db.save_trade(
+                        symbol=trade["symbol"],
+                        side="BUY" if trade["isBuyer"] else "SELL",
+                        price=float(trade["price"]),
+                        qty=float(trade["qty"]),
+                        time_ms=trade["time"],
+                        order_id=str(trade["id"])
+                    )
+                api_trade_count += len(trades)
             except Exception as e:
-                pass  # Skip symbols with no history
+                logger.debug("sync_trades: skipping %s — %s", symbol, e)
 
-        conn.commit()
-        conn.close()
+        # If Binance API returned nothing, seed from journal entries
+        if api_trade_count == 0 and self.journal:
+            entries = self.journal.get_entries(limit=200)
+            for entry in entries:
+                coin = entry.get("coin", "")
+                action = entry.get("action", "")
+                price = entry.get("price_usd", 0)
+                amount = entry.get("amount_usd")
+                qty = entry.get("qty")
+                created_at = entry.get("created_at", "")
+                sym = coin.upper() + "USDT"
+                try:
+                    ts = int(datetime.strptime(created_at[:19], "%Y-%m-%d %H:%M:%S").timestamp() * 1000)
+                except Exception as e:
+                    logger.debug("sync_trades: bad created_at '%s' — %s", created_at, e)
+                    ts = int(datetime.utcnow().timestamp() * 1000)
+                if ts < cutoff:
+                    continue
+                effective_qty = qty if qty else (amount / price if amount and price else 0)
+                self.db.save_trade(
+                    symbol=sym,
+                    side=action,
+                    price=price,
+                    qty=effective_qty or 0.0,
+                    time_ms=ts,
+                    order_id=f"journal_{entry.get('id', ts)}"
+                )
 
     def calculate_fomo_score(self) -> dict:
         """
         FOMO Score: Did you buy during Fear & Greed extremes (>75 greed)?
         Higher score = more FOMO buying detected.
         """
-        conn = sqlite3.connect(DB_PATH)
-        c = conn.cursor()
-
-        # Get buy trades from last 30 days
         cutoff = int((datetime.utcnow() - timedelta(days=30)).timestamp() * 1000)
-        c.execute("SELECT time, price FROM trades WHERE side='BUY' AND time > ?", (cutoff,))
-        buys = c.fetchall()
-        conn.close()
+        trades = self.db.get_trades(cutoff_ms=cutoff)
+        buys = [(t["time"], t["price"]) for t in trades if t["side"] == "BUY"]
 
         if not buys:
             return {"score": 0, "label": "N/A", "detail": "No trades in last 30 days."}
@@ -129,18 +119,14 @@ class BehaviorCoach:
             "rapid_buy_clusters": rapid_buys,
         }
 
-    def detect_panic_sells(self) -> list[dict]:
+    def detect_panic_sells(self) -> list:
         """
         Detect sells that happened near the 30-day low before the sell
         AND where price has since recovered >15%.
-        This distinguishes emotional selling at a local bottom from rational profit-taking.
         """
-        conn = sqlite3.connect(DB_PATH)
-        c = conn.cursor()
         cutoff = int((datetime.utcnow() - timedelta(days=30)).timestamp() * 1000)
-        c.execute("SELECT symbol, price, time FROM trades WHERE side='SELL' AND time > ?", (cutoff,))
-        sells = c.fetchall()
-        conn.close()
+        trades = self.db.get_trades(cutoff_ms=cutoff)
+        sells = [(t["symbol"], t["price"], t["time"]) for t in trades if t["side"] == "SELL"]
 
         panic_sells = []
         for symbol, sell_price, sell_time_ms in sells:
@@ -148,24 +134,19 @@ class BehaviorCoach:
                 current = self.market.get_price(symbol)
                 recovery = ((current - sell_price) / sell_price) * 100
                 if recovery <= 15:
-                    continue  # Price hasn't recovered meaningfully — not a panic sell signal
+                    continue
 
-                # Check if sell was near the 30-day low before the sell
                 sell_dt = datetime.utcfromtimestamp(sell_time_ms / 1000)
                 start_ms = int((sell_dt - timedelta(days=30)).timestamp() * 1000)
                 raw = self.market.client.klines(
-                    symbol=symbol,
-                    interval="1d",
-                    startTime=start_ms,
-                    endTime=sell_time_ms,
-                    limit=30
+                    symbol=symbol, interval="1d",
+                    startTime=start_ms, endTime=sell_time_ms, limit=30
                 )
                 if not raw:
                     continue
-                thirty_day_low = min(float(row[3]) for row in raw)  # row[3] = daily low
-                pct_above_low = ((sell_price - thirty_day_low) / thirty_day_low) * 100
+                thirty_day_low = min(float(row[3]) for row in raw)
+                pct_above_low  = ((sell_price - thirty_day_low) / thirty_day_low) * 100
 
-                # Panic sell = sold within 10% of the 30-day low AND price has recovered >15%
                 if pct_above_low <= 10.0:
                     panic_sells.append({
                         "symbol": symbol,
@@ -176,18 +157,15 @@ class BehaviorCoach:
                         "thirty_day_low": round(thirty_day_low, 4),
                         "pct_above_low": round(pct_above_low, 1),
                     })
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("detect_panic_sells: skipping %s — %s", symbol, e)
         return panic_sells
 
     def calculate_overtrading_index(self) -> dict:
         """Count trades per week — high frequency often leads to worse outcomes."""
-        conn = sqlite3.connect(DB_PATH)
-        c = conn.cursor()
         cutoff = int((datetime.utcnow() - timedelta(days=30)).timestamp() * 1000)
-        c.execute("SELECT COUNT(*) FROM trades WHERE time > ?", (cutoff,))
-        count = c.fetchone()[0]
-        conn.close()
+        trades = self.db.get_trades(cutoff_ms=cutoff)
+        count = len(trades)
 
         per_week = count / 4.3
         label = t("behavior.overtrade.label.healthy") if per_week < 5 else t("behavior.overtrade.label.mod") if per_week < 15 else t("behavior.overtrade.label.high") if per_week < 30 else t("behavior.overtrade.label.over")
@@ -204,91 +182,68 @@ class BehaviorCoach:
 
     def get_streaks(self) -> dict:
         """Get gamified streak data — days without panic selling, etc."""
-        conn = sqlite3.connect(DB_PATH)
-        c = conn.cursor()
-        c.execute("SELECT streak_type, count, last_updated FROM streaks")
-        rows = c.fetchall()
-        conn.close()
-
-        streaks = {}
-        for streak_type, count, last_updated in rows:
-            streaks[streak_type] = {"count": count, "last_updated": last_updated}
-
-        # Default streaks
-        if "no_panic_sell" not in streaks:
-            streaks["no_panic_sell"] = {"count": 0, "last_updated": None}
-        if "dca_consistency" not in streaks:
-            streaks["dca_consistency"] = {"count": 0, "last_updated": None}
-
-        return streaks
+        return self.db.get_streaks()
 
     def update_streaks(self, has_panic_sell: bool, has_recent_buy: bool):
         """Update streak counters. Call once per behavior report."""
-        conn = sqlite3.connect(DB_PATH)
-        c = conn.cursor()
         today = datetime.utcnow().strftime("%Y-%m-%d")
+        streaks = self.db.get_streaks()
 
         # --- No panic sell streak ---
-        c.execute("SELECT count, last_updated FROM streaks WHERE streak_type='no_panic_sell'")
-        row = c.fetchone()
+        nps = streaks.get("no_panic_sell", {"count": 0, "last_updated": None})
         if has_panic_sell:
-            if row:
-                c.execute("UPDATE streaks SET count=0, last_updated=? WHERE streak_type='no_panic_sell'", (today,))
-            else:
-                c.execute("INSERT INTO streaks (streak_type, count, start_date, last_updated) VALUES ('no_panic_sell', 0, ?, ?)", (today, today))
+            self.db.update_streak("no_panic_sell", 0, today)
         else:
-            if not row:
-                c.execute("INSERT INTO streaks (streak_type, count, start_date, last_updated) VALUES ('no_panic_sell', 1, ?, ?)", (today, today))
-            elif row[1] and row[1] != today:
+            if nps["last_updated"] and nps["last_updated"] != today:
                 try:
-                    days = (datetime.strptime(today, "%Y-%m-%d") - datetime.strptime(row[1], "%Y-%m-%d")).days
+                    days = (datetime.strptime(today, "%Y-%m-%d") - 
+                            datetime.strptime(nps["last_updated"], "%Y-%m-%d")).days
                 except Exception:
                     days = 1
-                new_count = row[0] + max(1, days)
-                c.execute("UPDATE streaks SET count=?, last_updated=? WHERE streak_type='no_panic_sell'", (new_count, today))
+                new_count = nps["count"] + max(1, days)
+                self.db.update_streak("no_panic_sell", new_count, today)
+            elif not nps["last_updated"]:
+                self.db.update_streak("no_panic_sell", 1, today)
 
         # --- DCA consistency streak (weekly) ---
-        c.execute("SELECT count, last_updated FROM streaks WHERE streak_type='dca_consistency'")
-        dca_row = c.fetchone()
+        dca = streaks.get("dca_consistency", {"count": 0, "last_updated": None})
         if has_recent_buy:
-            if not dca_row:
-                c.execute("INSERT INTO streaks (streak_type, count, start_date, last_updated) VALUES ('dca_consistency', 1, ?, ?)", (today, today))
-            elif dca_row[1] and dca_row[1] != today:
+            if dca["last_updated"] and dca["last_updated"] != today:
                 try:
-                    days = (datetime.strptime(today, "%Y-%m-%d") - datetime.strptime(dca_row[1], "%Y-%m-%d")).days
+                    days = (datetime.strptime(today, "%Y-%m-%d") - 
+                            datetime.strptime(dca["last_updated"], "%Y-%m-%d")).days
                 except Exception:
                     days = 0
                 if days >= 7:
-                    c.execute("UPDATE streaks SET count=?, last_updated=? WHERE streak_type='dca_consistency'", (dca_row[0] + 1, today))
+                    self.db.update_streak("dca_consistency", dca["count"] + 1, today)
+            elif not dca["last_updated"]:
+                self.db.update_streak("dca_consistency", 1, today)
         else:
-            if dca_row and dca_row[1]:
+            if dca["last_updated"]:
                 try:
-                    days = (datetime.strptime(today, "%Y-%m-%d") - datetime.strptime(dca_row[1], "%Y-%m-%d")).days
+                    days = (datetime.strptime(today, "%Y-%m-%d") - 
+                            datetime.strptime(dca["last_updated"], "%Y-%m-%d")).days
                     if days >= 14:
-                        c.execute("UPDATE streaks SET count=0, last_updated=? WHERE streak_type='dca_consistency'", (today,))
+                        self.db.update_streak("dca_consistency", 0, today)
                 except Exception:
                     pass
 
-        conn.commit()
-        conn.close()
-
-    def print_behavior_report(self, symbols: list[str] = None):
+    def print_behavior_report(self, symbols: list = None):
         """Print a rich behavior analysis panel."""
-        # FIX 1: Sync trades from Binance before reading DB
+        # Always sync trades — fall back to journal coins if no symbols given
+        if not symbols and self.journal:
+            entries = self.journal.get_entries(limit=200)
+            symbols = list({entry["coin"].upper() + "USDT" for entry in entries}) if entries else []
         if symbols:
             self.sync_trades(symbols)
 
-        fomo = self.calculate_fomo_score()
+        fomo      = self.calculate_fomo_score()
         overtrade = self.calculate_overtrading_index()
-        panic = self.detect_panic_sells()
+        panic     = self.detect_panic_sells()
 
-        # FIX 6: Update streaks based on current data
         week_ago = int((datetime.utcnow() - timedelta(days=7)).timestamp() * 1000)
-        conn2 = sqlite3.connect(DB_PATH)
-        c2 = conn2.cursor()
-        c2.execute("SELECT COUNT(*) FROM trades WHERE side='BUY' AND time > ?", (week_ago,))
-        recent_buys = c2.fetchone()[0]
-        conn2.close()
+        trades = self.db.get_trades(cutoff_ms=week_ago)
+        recent_buys = sum(1 for t in trades if t["side"] == "BUY")
         self.update_streaks(has_panic_sell=bool(panic), has_recent_buy=recent_buys > 0)
         streaks = self.get_streaks()  # Get fresh streaks after update
 

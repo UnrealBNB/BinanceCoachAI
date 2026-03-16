@@ -1,37 +1,16 @@
 """
 alerts.py — Context-rich price alert system
 Alerts tell you not just WHAT happened, but WHY it matters
+Uses coach.db for all data storage (consolidated database).
 """
 
-import sqlite3
 import logging
-from pathlib import Path
-from datetime import datetime
 from rich.console import Console
 from modules.i18n import t
+from modules.coach_db import CoachDB
 
 logger = logging.getLogger(__name__)
-
 console = Console()
-
-DB_PATH = str(Path(__file__).parent.parent / "data" / "alerts.db")
-
-
-def init_alerts_db():
-    with sqlite3.connect(DB_PATH) as conn:
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS alerts (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                symbol TEXT,
-                condition TEXT,
-                threshold REAL,
-                triggered INTEGER DEFAULT 0,
-                created_at TEXT,
-                triggered_at TEXT,
-                notes TEXT
-            )
-        """)
-        conn.commit()
 
 
 class AlertManager:
@@ -40,29 +19,26 @@ class AlertManager:
     def __init__(self, market, telegram_notify=None):
         self.market = market
         self.telegram_notify = telegram_notify
-        init_alerts_db()
+        self.db = CoachDB()
 
     def add_alert(self, symbol: str, condition: str, threshold: float, notes: str = ""):
         """
         Add a price alert.
         condition: 'above' | 'below' | 'rsi_above' | 'rsi_below'
         """
-        with sqlite3.connect(DB_PATH) as conn:
-            conn.execute("""
-                INSERT INTO alerts (symbol, condition, threshold, created_at, notes)
-                VALUES (?, ?, ?, ?, ?)
-            """, (symbol, condition, threshold, datetime.utcnow().isoformat(), notes))
-            conn.commit()
+        self.db.add_alert(symbol, condition, threshold, notes)
 
     def check_alerts(self) -> list:
         """Check all untriggered alerts and fire any that match."""
-        with sqlite3.connect(DB_PATH) as conn:
-            rows = conn.execute(
-                "SELECT id, symbol, condition, threshold, notes FROM alerts WHERE triggered=0"
-            ).fetchall()
+        alerts = self.db.get_active_alerts()
 
         fired = []
-        for alert_id, symbol, condition, threshold, notes in rows:
+        for alert in alerts:
+            alert_id = alert["id"]
+            symbol = alert["symbol"]
+            condition = alert["condition"]
+            threshold = alert["threshold"]
+            notes = alert["notes"]
             try:
                 ctx = self.market.get_market_context(symbol)
                 price = ctx["price"]
@@ -148,21 +124,13 @@ class AlertManager:
         return msg
 
     def _mark_triggered(self, alert_id: int):
-        with sqlite3.connect(DB_PATH) as conn:
-            conn.execute(
-                "UPDATE alerts SET triggered=1, triggered_at=? WHERE id=?",
-                (datetime.utcnow().isoformat(), alert_id)
-            )
-            conn.commit()
+        self.db.trigger_alert(alert_id)
 
     def list_alerts(self):
         """List all active alerts."""
-        with sqlite3.connect(DB_PATH) as conn:
-            rows = conn.execute(
-                "SELECT symbol, condition, threshold, created_at, notes FROM alerts WHERE triggered=0"
-            ).fetchall()
+        alerts = self.db.get_active_alerts()
 
-        if not rows:
+        if not alerts:
             console.print(f"[yellow]{t('alert.none')}[/yellow]")
             return
 
@@ -174,6 +142,13 @@ class AlertManager:
         table.add_column(t("alert.col.created"))
         table.add_column(t("alert.col.notes"))
 
-        for symbol, condition, threshold, created_at, notes in rows:
-            table.add_row(symbol, condition, str(threshold), created_at[:10], notes or "")
+        for alert in alerts:
+            created = alert["created_at"] or ""
+            table.add_row(
+                alert["symbol"], 
+                alert["condition"], 
+                str(alert["threshold"]), 
+                created[:10] if created else "", 
+                alert["notes"] or ""
+            )
         console.print(table)

@@ -1,10 +1,10 @@
 """
 journal.py — Persistent decision journal with P&L tracking
 Log DCA decisions, track performance over time, sync to OpenClaw memory.
+Uses coach.db for all data storage (consolidated database).
 
 Fixes applied:
 - Context manager for all DB connections (no leaks on exception)
-- Module-level init flag (not re-run on every instantiation)
 - Action validated to BUY/SELL only
 - Negative price/amount rejected
 - get_performance() accounts for SELL entries (reduces held qty)
@@ -15,41 +15,18 @@ Fixes applied:
 - Python 3.9-compatible type hints
 """
 import html as html_lib
-import sqlite3
 import os
 import logging
 from datetime import datetime
-from pathlib import Path
 from typing import Optional, List
 from rich.console import Console
 from rich.table import Table
+from modules.coach_db import CoachDB
 
 logger = logging.getLogger(__name__)
 console = Console()
 
-DB_PATH = Path(__file__).parent.parent / "data" / "journal.db"
-_DB_INITIALIZED = False
 VALID_ACTIONS = {"BUY", "SELL"}
-
-
-def _init_db():
-    global _DB_INITIALIZED
-    if _DB_INITIALIZED:
-        return
-    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    with sqlite3.connect(DB_PATH) as conn:
-        conn.execute("""CREATE TABLE IF NOT EXISTS entries (
-            id          INTEGER PRIMARY KEY AUTOINCREMENT,
-            coin        TEXT    NOT NULL,
-            action      TEXT    NOT NULL,
-            price_usd   REAL    NOT NULL,
-            amount_usd  REAL,
-            qty         REAL,
-            notes       TEXT,
-            created_at  TEXT    DEFAULT CURRENT_TIMESTAMP
-        )""")
-        conn.commit()
-    _DB_INITIALIZED = True
 
 
 class DecisionJournal:
@@ -57,7 +34,7 @@ class DecisionJournal:
 
     def __init__(self, market=None):
         self.market = market
-        _init_db()
+        self.db = CoachDB()
 
     # ── Write ─────────────────────────────────────────────────────────────────
 
@@ -77,46 +54,34 @@ class DecisionJournal:
         # Sanitize notes — strip newlines so the memory file doesn't break
         notes = notes.strip().replace("\n", " ").replace("\r", "")
 
-        with sqlite3.connect(DB_PATH) as conn:
-            conn.execute(
-                "INSERT INTO entries (coin, action, price_usd, amount_usd, qty, notes) VALUES (?,?,?,?,?,?)",
-                (coin, action, price_usd, amount_usd, qty, notes)
-            )
-            conn.commit()
+        self.db.add_journal_entry(coin, action, price_usd, amount_usd, qty, notes)
 
         amt_display = f" (${amount_usd:,.2f})" if amount_usd is not None else ""
         console.print(f"[green]✅ Logged: {action} {coin} @ ${price_usd:,.4f}{amt_display}[/green]")
         self._sync_to_memory(coin, action, price_usd, amount_usd, notes)
 
     def delete_entry(self, entry_id: int) -> bool:
-        with sqlite3.connect(DB_PATH) as conn:
-            row = conn.execute("SELECT * FROM entries WHERE id=?", (entry_id,)).fetchone()
-            if not row:
-                console.print(f"[red]No entry with id={entry_id}[/red]")
-                return False
-            id_, coin, action, price, amount, qty, notes, created_at = row
-            conn.execute("DELETE FROM entries WHERE id=?", (entry_id,))
-            conn.commit()
-        console.print(
-            f"[yellow]🗑️  Deleted entry #{entry_id}: {action} {coin} "
-            f"@ ${price:,.4f} ({created_at[:10]})[/yellow]"
-        )
-        return True
+        # Get entry details before deletion for display
+        entries = self.db.get_journal_entries(limit=500)
+        entry = next((e for e in entries if e["id"] == entry_id), None)
+        
+        if not entry:
+            console.print(f"[red]No entry with id={entry_id}[/red]")
+            return False
+            
+        if self.db.delete_journal_entry(entry_id):
+            created = entry.get("created_at", "")[:10]
+            console.print(
+                f"[yellow]🗑️  Deleted entry #{entry_id}: {entry['action']} {entry['coin']} "
+                f"@ ${entry['price_usd']:,.4f} ({created})[/yellow]"
+            )
+            return True
+        return False
 
     # ── Read ──────────────────────────────────────────────────────────────────
 
     def get_entries(self, coin: Optional[str] = None, limit: int = 20) -> list:
-        with sqlite3.connect(DB_PATH) as conn:
-            if coin:
-                rows = conn.execute(
-                    "SELECT * FROM entries WHERE coin=? ORDER BY created_at DESC LIMIT ?",
-                    (coin.upper().replace("USDT", "").replace("USDC", ""), limit)
-                ).fetchall()
-            else:
-                rows = conn.execute(
-                    "SELECT * FROM entries ORDER BY created_at DESC LIMIT ?", (limit,)
-                ).fetchall()
-        return rows
+        return self.db.get_journal_entries(coin=coin, limit=limit)
 
     def get_performance(self, coin: Optional[str] = None) -> list:
         """
@@ -128,8 +93,13 @@ class DecisionJournal:
             return []
 
         coin_data: dict = {}
-        for row in entries:
-            id_, c, action, price, amount, qty, notes, created_at = row
+        for entry in entries:
+            c = entry["coin"]
+            action = entry["action"]
+            price = entry["price_usd"]
+            amount = entry["amount_usd"]
+            qty = entry["qty"]
+            
             if c not in coin_data:
                 coin_data[c] = {
                     "total_bought_qty":  0.0,
@@ -209,17 +179,19 @@ class DecisionJournal:
         table.add_column("Amount $", justify="right", width=10)
         table.add_column("Notes")
 
-        for row in entries:
-            id_, coin_, action, price, amount, qty, notes, created_at = row
+        for entry in entries:
+            action = entry["action"]
+            created_at = entry.get("created_at", "") or ""
+            amount = entry["amount_usd"]
             color = "green" if action == "BUY" else "red"
             table.add_row(
-                str(id_),
-                created_at[:10],
-                coin_,
+                str(entry["id"]),
+                created_at[:10] if created_at else "",
+                entry["coin"],
                 f"[{color}]{action}[/{color}]",
-                f"${price:,.4f}",
+                f"${entry['price_usd']:,.4f}",
                 f"${amount:,.2f}" if amount is not None else "—",
-                notes or "—",
+                entry["notes"] or "—",
             )
         console.print(table)
         console.print("[dim]To delete an entry: journal-delete <id>[/dim]")
@@ -282,14 +254,17 @@ class DecisionJournal:
                 'Add via: <code>/journaladd BTC buy 70000 100 "reason"</code>'
             )
         lines = ["📓 <b>Decision Journal</b>"]
-        for row in entries:
-            id_, coin_, action, price, amount, qty, notes, created_at = row
+        for entry in entries:
+            action = entry["action"]
+            amount = entry["amount_usd"]
+            notes = entry["notes"]
+            created_at = entry.get("created_at", "") or ""
             emoji     = "🟢" if action == "BUY" else "🔴"
             amt       = f" ${amount:,.0f}" if amount is not None else ""
-            safe_coin  = html_lib.escape(coin_)
+            safe_coin  = html_lib.escape(entry["coin"])
             safe_notes = html_lib.escape(notes) if notes else ""
             lines.append(
-                f"#{id_} {emoji} <b>{safe_coin}</b> {action} @ ${price:,.4f}{amt} — {created_at[:10]}"
+                f"#{entry['id']} {emoji} <b>{safe_coin}</b> {action} @ ${entry['price_usd']:,.4f}{amt} — {created_at[:10]}"
             )
             if safe_notes:
                 lines.append(f"   <i>{safe_notes}</i>")

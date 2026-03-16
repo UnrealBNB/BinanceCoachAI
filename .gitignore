@@ -1,0 +1,10 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Data files
+data/*.db
+data/*.db.bak
+data/*.csv
+data/*.json

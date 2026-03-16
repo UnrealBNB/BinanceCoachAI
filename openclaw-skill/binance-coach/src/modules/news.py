@@ -4,6 +4,7 @@ Fetches from the public Binance CMS API (no API key required).
 Tracks seen articles in data/seen_news.db to avoid duplicate alerts.
 """
 
+import os
 import sqlite3
 import logging
 import requests
@@ -37,30 +38,26 @@ class BinanceNews:
 
     def _init_db(self):
         DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-        conn = sqlite3.connect(DB_PATH)
-        conn.execute(
-            "CREATE TABLE IF NOT EXISTS seen "
-            "(article_id INTEGER PRIMARY KEY, seen_at TEXT)"
-        )
-        conn.commit()
-        conn.close()
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS seen "
+                "(article_id INTEGER PRIMARY KEY, seen_at TEXT)"
+            )
+            conn.commit()
 
     def _is_seen(self, article_id: int) -> bool:
-        conn = sqlite3.connect(DB_PATH)
-        row = conn.execute(
-            "SELECT 1 FROM seen WHERE article_id=?", (article_id,)
-        ).fetchone()
-        conn.close()
-        return row is not None
+        with sqlite3.connect(DB_PATH) as conn:
+            return conn.execute(
+                "SELECT 1 FROM seen WHERE article_id=?", (article_id,)
+            ).fetchone() is not None
 
     def _mark_seen(self, article_id: int):
-        conn = sqlite3.connect(DB_PATH)
-        conn.execute(
-            "INSERT OR IGNORE INTO seen VALUES (?,?)",
-            (article_id, datetime.now().isoformat())
-        )
-        conn.commit()
-        conn.close()
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.execute(
+                "INSERT OR IGNORE INTO seen VALUES (?,?)",
+                (article_id, datetime.now().isoformat())
+            )
+            conn.commit()
 
     def get_articles(self, catalog_id: int, limit: int = 5) -> list:
         """Fetch articles from the Binance CMS API for a given catalog."""
@@ -215,8 +212,52 @@ class BinanceNews:
 
 # ── Watcher daemon ───────────────────────────────────────────────────────────
 
+def _is_openclaw_mode() -> bool:
+    """Detect if running under OpenClaw (no bot token, but openclaw CLI available)."""
+    import shutil
+    token = os.getenv("TELEGRAM_BOT_TOKEN", "")
+    if token:
+        return False  # Has bot token, use direct Telegram API
+    return shutil.which("openclaw") is not None
+
+
+def _send_openclaw(chat_id: str, text: str) -> bool:
+    """Send message via OpenClaw CLI. Returns True on success."""
+    import subprocess
+    try:
+        # Use openclaw message send with Telegram target
+        result = subprocess.run(
+            ["openclaw", "message", "send",
+             "--channel", "telegram",
+             "--to", f"telegram:{chat_id}",
+             "--message", text],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        if result.returncode == 0:
+            return True
+        logger.warning(f"openclaw message send failed: {result.stderr}")
+        return False
+    except Exception as e:
+        logger.warning(f"openclaw send error: {e}")
+        return False
+
+
 def _send_telegram(token: str, chat_id: str, text: str):
-    """Send a Telegram message via Bot API."""
+    """Send a Telegram message via Bot API or OpenClaw fallback.
+    Token is passed as a path segment (Telegram's standard), but we suppress
+    it from any error messages to avoid accidental log exposure.
+    """
+    # OpenClaw mode: use CLI instead of direct API
+    if not token and _is_openclaw_mode():
+        _send_openclaw(chat_id, text)
+        return
+
+    if not token:
+        logger.warning("No TELEGRAM_BOT_TOKEN and openclaw not available — cannot send")
+        return
+
     try:
         requests.post(
             f"https://api.telegram.org/bot{token}/sendMessage",
@@ -224,7 +265,9 @@ def _send_telegram(token: str, chat_id: str, text: str):
             timeout=10,
         )
     except Exception as e:
-        logger.error(f"Telegram send failed: {e}")
+        # Redact token from error string before logging
+        safe_err = str(e).replace(token, "<redacted>")
+        logger.error(f"Telegram send failed: {safe_err}")
 
 
 def run_watcher(interval: int = 60, portfolio=None):
@@ -232,6 +275,10 @@ def run_watcher(interval: int = 60, portfolio=None):
     Blocking watcher loop. Polls Binance CMS every `interval` seconds.
     Sends Telegram notifications when new listings/launchpools/news appear.
     Writes PID to data/news_watcher.pid for stop/status.
+    
+    Supports two modes:
+    1. Direct Telegram API (TELEGRAM_BOT_TOKEN set)
+    2. OpenClaw mode (no token, uses `openclaw message send`)
     """
     import os
     import time
@@ -239,9 +286,16 @@ def run_watcher(interval: int = 60, portfolio=None):
 
     token = os.getenv("TELEGRAM_BOT_TOKEN", "")
     chat_id = os.getenv("TELEGRAM_USER_ID", "")
+    openclaw_mode = _is_openclaw_mode()
 
-    if not token or not chat_id:
-        console.print("[red]❌ TELEGRAM_BOT_TOKEN and TELEGRAM_USER_ID must be set in .env to use watch mode.[/red]")
+    # Need either token OR openclaw CLI, plus a chat_id
+    if not chat_id:
+        console.print("[red]❌ TELEGRAM_USER_ID must be set in .env to use watch mode.[/red]")
+        return
+
+    if not token and not openclaw_mode:
+        console.print("[red]❌ Neither TELEGRAM_BOT_TOKEN nor openclaw CLI found.[/red]")
+        console.print("[dim]Set TELEGRAM_BOT_TOKEN in .env, or install OpenClaw.[/dim]")
         return
 
     # Write PID file
@@ -259,12 +313,14 @@ def run_watcher(interval: int = 60, portfolio=None):
     signal.signal(signal.SIGINT, _cleanup)
 
     news_mod = BinanceNews(portfolio=portfolio)
+    mode_label = "OpenClaw" if openclaw_mode else "Telegram Bot API"
     console.print(f"[green]👁  BinanceCoach watcher started (interval: {interval}s)[/green]")
-    console.print(f"[dim]Notifying Telegram user {chat_id}. Press Ctrl+C to stop.[/dim]")
+    console.print(f"[dim]Mode: {mode_label} | Notifying Telegram user {chat_id}. Press Ctrl+C to stop.[/dim]")
 
     # Send startup message
     _send_telegram(token, chat_id,
         f"👁 <b>BinanceCoach Watcher started</b>\n"
+        f"Mode: {mode_label}\n"
         f"Checking for new listings &amp; announcements every <b>{interval}s</b>."
     )
 

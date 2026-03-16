@@ -36,6 +36,8 @@ class PnLCalculator:
         self.market    = market
         self.portfolio = portfolio
         self.journal   = journal  # Optional DecisionJournal for fallback
+        self._convert_cache = None  # Cache convert trades to avoid repeated API calls
+        self._convert_cache_days = None
 
     def _get_trades(self, symbol: str, days: int = DEFAULT_DAYS) -> list:
         try:
@@ -44,6 +46,87 @@ class PnLCalculator:
             return trades or []
         except Exception as e:
             logger.warning(f"Could not fetch trades for {symbol}: {e}")
+            return []
+
+    def _get_convert_trades(self, days: int = DEFAULT_DAYS) -> list:
+        """
+        Fetch Binance Convert trades (users who DCA via Convert instead of spot).
+        Uses /sapi/v1/convert/tradeFlow endpoint.
+        Returns normalized list compatible with my_trades format.
+        Results are cached to avoid repeated API calls.
+        """
+        # Return cached result if available for same or longer window
+        if self._convert_cache is not None and self._convert_cache_days and self._convert_cache_days >= days:
+            return self._convert_cache
+
+        try:
+            start_ms = int((datetime.now() - timedelta(days=days)).timestamp() * 1000)
+            end_ms   = int(datetime.now().timestamp() * 1000)
+
+            # Binance Convert API requires signed request
+            response = self.client.send_request(
+                "GET",
+                "/sapi/v1/convert/tradeFlow",
+                {"startTime": start_ms, "endTime": end_ms, "limit": 1000}
+            )
+
+            if not response or "list" not in response:
+                return []
+
+            normalized = []
+            for trade in response["list"]:
+                # Convert trade structure:
+                # {quoteId, orderId, orderStatus, fromAsset, fromAmount, toAsset, toAmount, ...}
+                from_asset = trade.get("fromAsset", "")
+                to_asset   = trade.get("toAsset", "")
+                from_amt   = float(trade.get("fromAmount", 0))
+                to_amt     = float(trade.get("toAmount", 0))
+                ts         = trade.get("createTime", 0)
+
+                # Determine if this is a BUY or SELL from crypto perspective
+                # If fromAsset is stablecoin → buying crypto (toAsset)
+                # If toAsset is stablecoin → selling crypto (fromAsset)
+                stables = {"USDT", "USDC", "BUSD", "FDUSD", "DAI", "TUSD"}
+
+                if from_asset in stables:
+                    # Buying crypto with stablecoin
+                    symbol = to_asset + from_asset
+                    price  = from_amt / to_amt if to_amt > 0 else 0
+                    normalized.append({
+                        "symbol":  symbol,
+                        "isBuyer": True,
+                        "price":   price,
+                        "qty":     to_amt,
+                        "time":    ts,
+                        "id":      f"convert_{trade.get('orderId', ts)}",
+                        "source":  "convert",
+                    })
+                elif to_asset in stables:
+                    # Selling crypto for stablecoin
+                    symbol = from_asset + to_asset
+                    price  = to_amt / from_amt if from_amt > 0 else 0
+                    normalized.append({
+                        "symbol":  symbol,
+                        "isBuyer": False,
+                        "price":   price,
+                        "qty":     from_amt,
+                        "time":    ts,
+                        "id":      f"convert_{trade.get('orderId', ts)}",
+                        "source":  "convert",
+                    })
+                else:
+                    # Crypto-to-crypto swap (e.g., BTC → ETH)
+                    # Treat as sell fromAsset, buy toAsset
+                    # For P&L purposes, we need a USD price — skip these for now
+                    logger.debug(f"Skipping crypto-to-crypto convert: {from_asset} → {to_asset}")
+
+            # Cache results
+            self._convert_cache = normalized
+            self._convert_cache_days = days
+            return normalized
+
+        except Exception as e:
+            logger.debug(f"Convert trades fetch failed (may not be enabled): {e}")
             return []
 
     def _get_trades_extended(self, symbol: str) -> tuple:
@@ -56,7 +139,8 @@ class PnLCalculator:
 
     def diagnose_api(self) -> dict:
         """Check why my_trades might be returning nothing."""
-        result = {"permissions": [], "account_ok": False, "sample_trades": 0, "notes": []}
+        result = {"permissions": [], "account_ok": False, "sample_trades": 0, 
+                  "convert_trades": 0, "notes": []}
         try:
             account = self.client.account()
             result["permissions"]  = account.get("permissions", [])
@@ -72,16 +156,24 @@ class PnLCalculator:
         except Exception as e:
             result["notes"].append(f"my_trades error: {e}")
 
+        # Also check Convert trades
+        try:
+            convert = self._get_convert_trades(days=90)
+            result["convert_trades"] = len(convert)
+            if convert:
+                result["notes"].append(f"Found {len(convert)} Convert trades (included in P&L).")
+        except Exception:
+            pass
+
         perms = result["permissions"]
         if not any("SPOT" in p or "TRD" in p for p in perms):
             result["notes"].append("No SPOT trading permissions found — Read access only?")
-        if result["sample_trades"] == 0:
+        if result["sample_trades"] == 0 and result["convert_trades"] == 0:
             result["notes"].append(
                 "Zero trades returned. Possible reasons: "
-                "(1) trades made via Binance Convert (different endpoint), "
-                "(2) coins deposited/transferred from another account, "
-                "(3) all trades are outside the time window, "
-                "(4) API key missing trade-history read permission."
+                "(1) coins deposited/transferred from another account, "
+                "(2) all trades are outside the time window, "
+                "(3) API key missing trade-history read permission."
             )
         return result
 
@@ -171,12 +263,16 @@ class PnLCalculator:
             return []
 
     def calculate_coin_pnl(self, symbol: str, days: int = DEFAULT_DAYS) -> Optional[dict]:
-        """FIFO P&L for a single coin (default: last 365 days)."""
+        """FIFO P&L for a single coin (default: last 365 days). Includes Convert trades."""
         symbol = symbol.upper()
         if not symbol.endswith("USDT"):
             symbol += "USDT"
 
+        # Fetch both spot trades AND convert trades
         trades = self._get_trades(symbol, days=days)
+        convert_trades = [t for t in self._get_convert_trades(days=days) if t["symbol"] == symbol]
+        trades = trades + convert_trades
+
         if not trades:
             return None
 

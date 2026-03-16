@@ -106,7 +106,7 @@ def run_demo():
 
 
 def run_cli():
-    """Interactive CLI mode."""
+    """Interactive CLI mode — delegates to _dispatch_command() for all commands."""
     from modules.market import MarketData
     from modules.portfolio import Portfolio
     from modules.dca import DCAAdvisor
@@ -114,6 +114,7 @@ def run_cli():
     from modules.behavior import BehaviorCoach
     from modules.education import EducationModule
     from modules.ai_coach import AICoach
+    from modules.journal import DecisionJournal
 
     client = init_clients()
     market = MarketData(client)
@@ -124,7 +125,8 @@ def run_cli():
         risk_profile=os.getenv("RISK_PROFILE", "moderate")
     )
     alert_mgr = AlertManager(market)
-    behavior = BehaviorCoach(client, market)
+    _journal  = DecisionJournal(market=market)
+    behavior  = BehaviorCoach(client, market, journal=_journal)
     edu = EducationModule()
 
     # AI coach — optional, graceful fallback if no API key
@@ -141,7 +143,7 @@ def run_cli():
 
     while True:
         try:
-            cmd = input("coach> ").strip().lower()
+            cmd = input("coach> ").strip()
         except (KeyboardInterrupt, EOFError):
             console.print("\n[yellow]Goodbye! Trade smart. 👋[/yellow]")
             break
@@ -151,12 +153,12 @@ def run_cli():
 
         parts = cmd.split()
 
-        if parts[0] == "lang":
+        # Handle `lang` specially — affects REPL state, not in _dispatch_command
+        if parts[0].lower() == "lang":
             if len(parts) > 1 and parts[1].lower() in AVAILABLE_LANGS:
                 set_lang(parts[1].lower())
                 console.print(f"[green]{t('cli.lang_switched')}[/green]")
             else:
-                # Show available languages
                 lang_list = "\n".join(
                     f"  {'→' if code == get_lang() else ' '} [cyan]{code}[/cyan]  {label}"
                     for code, label in AVAILABLE_LANGS.items()
@@ -164,248 +166,13 @@ def run_cli():
                 console.print(t("cli.lang_list", langs=lang_list))
             continue
 
-        if parts[0] == "help":
-            console.print(t("cli.help"))
-
-        elif parts[0] == "portfolio":
-            try:
-                balances = portfolio.get_balances()
-                health = portfolio.calculate_health_score(balances)
-                portfolio.print_portfolio_table(balances, health)
-            except Exception as e:
-                console.print(f"[red]Error: {e}[/red]")
-
-        elif parts[0] == "dca":
-            if len(parts) > 1:
-                symbols = [s.upper() for s in parts[1:]]
-            else:
-                # FIX 5: Auto-detect from portfolio holdings
-                try:
-                    _bals = portfolio.get_balances()
-                    symbols = [
-                        b["asset"] + "USDT"
-                        for b in _bals
-                        if not b["is_stable"] and b["usd_value"] > 10
-                    ]
-                    valid = []
-                    for sym in symbols[:6]:
-                        try:
-                            market.get_price(sym)
-                            valid.append(sym)
-                        except Exception:
-                            pass
-                    symbols = valid if valid else ["BTCUSDT", "ETHUSDT", "BNBUSDT"]
-                except Exception:
-                    symbols = ["BTCUSDT", "ETHUSDT", "BNBUSDT"]
-            dca.print_recommendations(symbols)
-
-        elif parts[0] == "behavior":
-            # FIX 1: Sync trades from portfolio before analysis
-            try:
-                _bals = portfolio.get_balances()
-                _syms = [b["asset"] + "USDT" for b in _bals if not b["is_stable"] and b["usd_value"] > 5]
-            except Exception:
-                _syms = []
-            behavior.print_behavior_report(symbols=_syms)
-
-        elif parts[0] == "alert" and len(parts) >= 4:
-            symbol, condition, threshold = parts[1].upper(), parts[2], float(parts[3])
-            notes = " ".join(parts[4:]) if len(parts) > 4 else ""
-            alert_mgr.add_alert(symbol, condition, threshold, notes)
-
-        elif parts[0] == "alerts":
-            alert_mgr.list_alerts()
-
-        elif parts[0] == "check-alerts":
-            fired = alert_mgr.check_alerts()
-            if fired:
-                for f in fired:
-                    console.print(Panel(f["context"], title=f"🔔 Alert: {f['symbol']}", border_style="yellow"))
-            else:
-                console.print("[green]No alerts triggered.[/green]")
-
-        elif parts[0] == "learn":
-            topic = parts[1] if len(parts) > 1 else None
-            if topic:
-                edu.explain(topic)
-            else:
-                edu.list_lessons()
-
-        elif parts[0] == "market":
-            symbol = parts[1].upper() if len(parts) > 1 else "BTCUSDT"
-            ctx = market.get_market_context(symbol)
-            fg = ctx["fear_greed"]
-            console.print(f"""
-[bold]{t('market.title', symbol=symbol)}[/bold]
-{t('market.price')}:        ${ctx['price']:,.4f}
-{t('market.rsi')}:          {ctx['rsi']} ({ctx['rsi_zone_label']})
-{t('market.trend')}:        {ctx['trend']}
-{t('market.sma50')}:       ${ctx['sma_50']:,.4f}
-{t('market.sma200')}:      ${ctx['sma_200']:,.4f}
-{t('market.ema21')}:       ${ctx['ema_21']:,.4f}
-{t('market.vs_sma200')}:    {ctx['vs_sma200_pct']:+.1f}%
-{t('market.fear_greed')}: {fg['value']} ({fg['classification']})
-""")
-
-        elif parts[0] == "fg":
-            fg = market.get_fear_greed()
-            val = fg["value"]
-            emoji = "😱" if val < 25 else "😰" if val < 40 else "😐" if val < 55 else "😄" if val < 75 else "🤑"
-            console.print(f"{emoji} Fear & Greed: [bold]{val}/100[/bold] — {fg['classification']}")
-
-        elif parts[0] == "project":
-            # FIX 7: Show 3 scenarios with per-asset growth rates
-            symbol = parts[1].upper() if len(parts) > 1 else "BTCUSDT"
-            proj = dca.project_accumulation(symbol)
-            sc = proj.get("scenarios", {})
-            bear = sc.get("bear", {})
-            base = sc.get("base", {})
-            bull = sc.get("bull", {})
-            console.print(Panel(
-                f"[dim]Asset growth assumption: {proj['monthly_growth_assumed']}%/month[/dim]\n\n"
-                f"[red]🐻 Bear  ({bear.get('monthly_growth_pct', 0)}%/mo):[/red]  invest ${bear.get('total_invested', 0):,.0f} → ${bear.get('projected_value', 0):,.0f}  ({bear.get('roi_pct', 0):+.1f}%)\n"
-                f"[yellow]📊 Base  ({base.get('monthly_growth_pct', 0)}%/mo):[/yellow] invest ${base.get('total_invested', 0):,.0f} → ${base.get('projected_value', 0):,.0f}  ({base.get('roi_pct', 0):+.1f}%)\n"
-                f"[green]🐂 Bull  ({bull.get('monthly_growth_pct', 0)}%/mo):[/green]  invest ${bull.get('total_invested', 0):,.0f} → ${bull.get('projected_value', 0):,.0f}  ({bull.get('roi_pct', 0):+.1f}%)\n\n"
-                f"[dim]{proj['note']}[/dim]",
-                title=f"📅 {symbol} — 12-Month DCA Projection", border_style="green"
-            ))
-
-        # ── AI commands ───────────────────────────────────────────────────
-        elif parts[0] == "models":
-            if not ai:
-                console.print("[yellow]⚠️  No Anthropic API key configured.[/yellow]")
-            else:
-                console.print("[dim]Fetching models from Anthropic API...[/dim]")
-                models = ai.list_models()
-                ai.print_models_table(models)
-
-        elif parts[0] == "model":
-            if not ai:
-                console.print("[yellow]⚠️  No Anthropic API key configured.[/yellow]")
-            elif len(parts) < 2:
-                console.print(f"[yellow]Usage: model <id>  —  e.g. model claude-sonnet-4-5[/yellow]")
-            else:
-                ai.set_model(parts[1])
-                console.print(f"[green]✅ Model switched to: {ai.model}[/green]")
-
-        elif parts[0] == "coach":
-            if not ai:
-                console.print("[yellow]⚠️  No Anthropic API key configured.[/yellow]")
-            else:
-                console.print("[dim]🤖 Analysing portfolio + calling Claude...[/dim]")
-                try:
-                    balances = portfolio.get_balances()
-                    health = portfolio.calculate_health_score(balances)
-                    ctx = market.get_market_context("BTCUSDT")
-                    bc = behavior
-                    fomo = bc.calculate_fomo_score()
-                    overtrade = bc.calculate_overtrading_index()
-                    panic = bc.detect_panic_sells()
-                    beh_data = {
-                        "fomo_score": fomo["score"],
-                        "fomo_label": fomo["label"],
-                        "total_trades": overtrade["total_30d"],
-                        "per_week": overtrade["per_week_avg"],
-                        "overtrade_label": overtrade["label"],
-                        "panic_count": len(panic),
-                    }
-                    result = ai.coaching_summary(health, ctx, beh_data)
-                    ai.print_response("Coaching Summary", result, "magenta")
-                except Exception as e:
-                    console.print(f"[red]AI error: {e}[/red]")
-
-        elif parts[0] == "weekly":
-            if not ai:
-                console.print("[yellow]⚠️  No Anthropic API key configured.[/yellow]")
-            else:
-                console.print("[dim]🤖 Generating weekly brief...[/dim]")
-                try:
-                    balances = portfolio.get_balances()
-                    health = portfolio.calculate_health_score(balances)
-                    ctx = market.get_market_context("BTCUSDT")
-                    bc = behavior
-                    fomo = bc.calculate_fomo_score()
-                    overtrade = bc.calculate_overtrading_index()
-                    panic = bc.detect_panic_sells()
-                    beh_data = {
-                        "fomo_score": fomo["score"],
-                        "fomo_label": fomo["label"],
-                        "total_trades": overtrade["total_30d"],
-                        "per_week": overtrade["per_week_avg"],
-                        "overtrade_label": overtrade["label"],
-                        "panic_count": len(panic),
-                    }
-                    market_summary = {
-                        "trend": ctx["trend"],
-                        "fg_value": ctx["fear_greed"]["value"],
-                        "fg_label": ctx["fear_greed"]["classification"],
-                    }
-                    symbols = ["BTCUSDT", "ETHUSDT", "BNBUSDT"]
-                    dca_recs = [dca.get_recommendation(s) for s in symbols]
-                    result = ai.weekly_brief(health, beh_data, market_summary, dca_recs)
-                    ai.print_response("Weekly Coaching Brief", result, "cyan")
-                except Exception as e:
-                    console.print(f"[red]AI error: {e}[/red]")
-
-        elif parts[0] == "ask":
-            if not ai:
-                console.print("[yellow]⚠️  No Anthropic API key configured.[/yellow]")
-            elif len(parts) < 2:
-                console.print("[yellow]Usage: ask <your question>[/yellow]")
-            else:
-                import re as _re
-                question = " ".join(parts[1:])
-                console.print("[dim]🤖 Gathering portfolio context & asking Claude...[/dim]")
-                try:
-                    # Full context: portfolio + behavior + coin data
-                    if client:
-                        _balances = portfolio.get_balances()
-                        _health   = portfolio.calculate_health_score(_balances)
-                        _beh      = behavior.calculate_fomo_score()
-                        _over     = behavior.calculate_overtrading_index()
-                        _total    = _health["total_usd"] or 1
-                        for _b in _balances:
-                            _b["pct"] = _b["usd_value"] / _total * 100
-                    else:
-                        _health, _balances, _beh, _over = {}, [], {}, {}
-
-                    fg  = market.get_fear_greed()
-                    _KNOWN = {"BTC","ETH","BNB","ADA","DOGE","SHIB","FLOKI","ANKR",
-                              "SOL","XRP","DOT","MATIC","AVAX","LINK","UNI","SCR"}
-                    mentioned = {w.upper() for w in _re.findall(r"\b[A-Za-z]{2,10}\b", question)
-                                 if w.upper() in _KNOWN} | {"BTC"}
-                    coin_data = {}
-                    for sym in mentioned:
-                        try:
-                            coin_data[sym] = market.get_market_context(sym + "USDT")
-                        except Exception:
-                            pass
-
-                    context = {
-                        "total_usd":       _health.get("total_usd", 0),
-                        "score":           _health.get("score"),
-                        "grade":           _health.get("grade"),
-                        "stable_pct":      _health.get("stable_pct", 0),
-                        "suggestions":     _health.get("suggestions", []),
-                        "holdings":        _balances[:10],
-                        "fg_value":        fg["value"],
-                        "fg_label":        fg["classification"],
-                        "fomo_score":      _beh.get("score", 0),
-                        "overtrade_label": _over.get("label", "?"),
-                        "panic_count":     0,
-                        "coin_data":       coin_data,
-                    }
-                    result = ai.chat(question, context)
-                    ai.print_response("Claude Answer", result, "green")
-                except Exception as ex:
-                    console.print(f"[red]AI error: {ex}[/red]")
-
-        elif parts[0] in ("quit", "exit", "q"):
-            console.print(f"[yellow]{t('general.goodbye')}[/yellow]")
+        # Delegate all other commands to the shared dispatcher
+        should_continue = _dispatch_command(
+            cmd, client, market, portfolio, dca,
+            alert_mgr, behavior, edu, ai, console
+        )
+        if not should_continue:
             break
-
-        else:
-            console.print(f"[red]{t('general.unknown_cmd', cmd=cmd)}[/red]")
 
 
 def run_telegram():
@@ -446,6 +213,7 @@ def run_command(cmd_str: str):
     from modules.alerts import AlertManager
     from modules.behavior import BehaviorCoach
     from modules.education import EducationModule
+    from modules.journal import DecisionJournal
 
     client = init_clients()
     market = MarketData(client)
@@ -455,8 +223,9 @@ def run_command(cmd_str: str):
         monthly_budget=float(os.getenv("DCA_BUDGET_MONTHLY", 500)),
         risk_profile=os.getenv("RISK_PROFILE", "moderate")
     )
-    alert_mgr = AlertManager(market)
-    behavior = BehaviorCoach(client, market)
+    alert_mgr  = AlertManager(market)
+    _journal_b = DecisionJournal(market=market)
+    behavior   = BehaviorCoach(client, market, journal=_journal_b)
     edu = EducationModule()
 
     try:
@@ -498,8 +267,22 @@ def _dispatch_command(cmd_str, client, market, portfolio, dca, alert_mgr, behavi
         console.print()
         try:
             balances = portfolio.get_balances()
-            health = portfolio.calculate_health_score(balances)
+            health   = portfolio.calculate_health_score(balances)
             portfolio.print_portfolio_table(balances, health)
+            fg = None
+            try:
+                fg = market.get_fear_greed()
+            except Exception:
+                pass
+            portfolio.save_snapshot(balances, health, fg=fg)  # auto-save to coach.db
+
+            # Issue #7: Suggest import-orders if order history is empty
+            from modules.coach_db import CoachDB
+            db = CoachDB()
+            if not db.has_orders():
+                console.print()
+                console.print("[dim]💡 Tip: Run [cyan]import-orders[/cyan] to import your Binance trade history.[/dim]")
+                console.print("[dim]   This enables P&L tracking, behavior analysis, and better coaching.[/dim]")
         except Exception as e:
             msg = str(e)
             if "401" in msg or "Invalid API-key" in msg:
@@ -737,16 +520,166 @@ def _dispatch_command(cmd_str, client, market, portfolio, dca, alert_mgr, behavi
         j = DecisionJournal(market=market)
         j.print_performance()
 
+    # ── Snapshot ────────────────────────────────────────────────────────────
+    elif parts[0] == "snapshot":
+        try:
+            balances = portfolio.get_balances()
+            health   = portfolio.calculate_health_score(balances)
+            from modules.coach_db import CoachDB
+            from datetime import datetime
+            db    = CoachDB()
+            today = datetime.now().strftime("%Y-%m-%d")
+            if db.has_snapshot_for(today):
+                console.print(f"[yellow]📸 Snapshot already saved for today ({today}).[/yellow]")
+            else:
+                portfolio.save_snapshot(balances, health)
+                console.print(f"[green]📸 Portfolio snapshot saved for {today} — ${health['total_usd']:,.2f}[/green]")
+        except Exception as e:
+            console.print(f"[red]Snapshot failed: {e}[/red]")
+
+    # ── History ─────────────────────────────────────────────────────────────
+    elif parts[0] == "history":
+        from modules.history import HistoryAnalyzer
+        from modules.coach_db import CoachDB
+        days_arg = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 7
+        ha = HistoryAnalyzer(CoachDB(), market)
+        if days_arg == 1 or (len(parts) > 1 and parts[1] in ["yesterday", "vs"]):
+            ha.print_today_vs_yesterday()
+        else:
+            ha.print_today_vs_yesterday()
+            console.print()
+            ha.print_history(days=days_arg)
+
+    # ── DCA History ──────────────────────────────────────────────────────────
+    elif parts[0] == "dca-history":
+        from modules.coach_db import CoachDB
+        from rich.table import Table as RTable
+        symbol_filter = parts[1].upper() if len(parts) > 1 else None
+        db   = CoachDB()
+        rows = db.get_dca_history(symbol=symbol_filter, limit=20)
+        if not rows:
+            console.print("[yellow]No DCA analysis history yet. Run 'bc.sh dca' first.[/yellow]")
+        else:
+            t2 = RTable(title="📐 DCA Analysis History", border_style="magenta")
+            t2.add_column("Date",       width=12)
+            t2.add_column("Symbol",     width=10)
+            t2.add_column("Price",      justify="right", width=12)
+            t2.add_column("RSI",        justify="right", width=7)
+            t2.add_column("F&G",        justify="right", width=6)
+            t2.add_column("Multiplier", justify="right", width=10)
+            t2.add_column("Weekly $",   justify="right", width=10)
+            for r in rows:
+                mc = "green" if r["multiplier"] >= 1.1 else ("red" if r["multiplier"] < 0.9 else "white")
+                t2.add_row(
+                    r["date"], r["symbol"],
+                    f"${r['price']:,.4f}" if r["price"] else "—",
+                    f"{r['rsi']:.1f}" if r["rsi"] else "—",
+                    str(r["fg_score"]) if r["fg_score"] else "—",
+                    f"[{mc}]×{r['multiplier']:.2f}[/{mc}]",
+                    f"${r['weekly_amount']:,.2f}" if r["weekly_amount"] else "—",
+                )
+            console.print(t2)
+
+    # ── Confirm DCA action ───────────────────────────────────────────────────
+    elif parts[0] == "confirm":
+        # confirm <analysis_id> yes|no [amount] [notes...]
+        from modules.coach_db import CoachDB
+        if len(parts) < 3:
+            console.print("[red]Usage: confirm <id> yes|no [amount] [notes][/red]")
+        else:
+            try:
+                analysis_id  = int(parts[1])
+                decision     = parts[2].lower()
+                amount       = float(parts[3]) if len(parts) > 3 and parts[3].replace(".","").isdigit() else None
+                notes        = " ".join(parts[4:]) if len(parts) > 4 else ""
+                action_type  = "dca_confirmed" if decision in ["yes","y","ja"] else "dca_skipped"
+                db = CoachDB()
+                # Look up symbol from analysis
+                hist = db.get_dca_history(limit=100)
+                rec  = next((r for r in hist if r["id"] == analysis_id), None)
+                symbol = rec["symbol"] if rec else "UNKNOWN"
+                db.save_user_action(analysis_id, symbol, action_type, amount, notes)
+                emoji = "✅" if action_type == "dca_confirmed" else "⏭️"
+                console.print(f"{emoji} Logged: {action_type} for analysis #{analysis_id} ({symbol})"
+                               + (f" — ${amount:,.2f}" if amount else ""))
+            except Exception as e:
+                console.print(f"[red]Confirm failed: {e}[/red]")
+
+    # ── Import orders from Binance ───────────────────────────────────────────
+    elif parts[0] == "import-orders":
+        from modules.coach_db import CoachDB
+        from datetime import datetime
+        db = CoachDB()
+        existing = db.get_order_count()
+        console.print(f"\n[bold]📥 Binance Order History Import[/bold]")
+        console.print(f"[dim]Orders already in DB: {existing}[/dim]\n")
+        console.print("This will fetch your filled order history from Binance and store it")
+        console.print("locally in coach.db. Your data never leaves your machine.\n")
+        console.print("[yellow]Do you want to import your Binance order history? (yes/no)[/yellow] ", end="")
+        try:
+            import sys
+            if sys.stdin.isatty():
+                answer = input("").strip().lower()
+            else:
+                # Non-interactive mode (--command flag) — require explicit opt-in via env var
+                answer = os.getenv("BC_IMPORT_ORDERS_CONFIRM", "no").strip().lower()
+                if answer != "yes":
+                    console.print("\n[dim]Non-interactive mode: set BC_IMPORT_ORDERS_CONFIRM=yes to auto-confirm.[/dim]")
+        except Exception as e:
+            logger.debug("import-orders: could not read stdin — %s", e)
+            answer = "no"
+        if answer not in ["yes", "y", "ja"]:
+            console.print("[dim]Import cancelled.[/dim]")
+        else:
+            all_assets = ["BTC","ETH","ADA","DOGE","SHIB","ANKR","FLOKI","BNB","SCR",
+                          "MONKY","TRUMP","NIGHT","OPN","SOL","XRP","AVAX","DOT","LINK","MATIC"]
+            imported = 0
+            skipped  = 0
+            for asset in all_assets:
+                for quote in ["USDT","USDC"]:
+                    try:
+                        orders = client.get_orders(symbol=asset+quote, limit=500)
+                        filled = [o for o in (orders or []) if o["status"] == "FILLED"]
+                        for o in filled:
+                            price    = float(o["price"]) if float(o["price"]) > 0 else (
+                                float(o.get("cummulativeQuoteQty",0)) / float(o["executedQty"])
+                                if float(o["executedQty"]) > 0 else 0
+                            )
+                            spent    = float(o.get("cummulativeQuoteQty", 0))
+                            ts       = o["time"]
+                            date_str = datetime.fromtimestamp(ts/1000).strftime("%Y-%m-%d")
+                            db.save_order(
+                                symbol   = asset + quote,
+                                side     = o["side"],
+                                price    = price,
+                                qty      = float(o["executedQty"]),
+                                spent_quote = spent,
+                                date     = date_str,
+                                timestamp= ts,
+                                source   = "binance_api",
+                                order_id = str(o["orderId"]),
+                            )
+                            imported += 1
+                    except Exception:
+                        skipped += 1
+            console.print(f"[green]✅ Imported {imported} orders into coach.db[/green]")
+            if skipped:
+                console.print(f"[dim]{skipped} symbols skipped (no history or error)[/dim]")
+
     # ── P&L Calculator ──────────────────────────────────────────────────────
     elif parts[0] == "pnl":
         from modules.pnl import PnLCalculator
-        pnl = PnLCalculator(client, market, portfolio)
+        from modules.journal import DecisionJournal
+        j   = DecisionJournal(market=market)
+        pnl = PnLCalculator(client, market, portfolio, journal=j)
         symbol_arg = parts[1].upper() if len(parts) > 1 else None
         pnl.print_pnl(symbol=symbol_arg)
 
     elif parts[0] == "pnl-export":
         from modules.pnl import PnLCalculator
-        pnl = PnLCalculator(client, market, portfolio)
+        from modules.journal import DecisionJournal
+        j   = DecisionJournal(market=market)
+        pnl = PnLCalculator(client, market, portfolio, journal=j)
         pnl.export_csv()
 
     # ── Rebalancing ─────────────────────────────────────────────────────────

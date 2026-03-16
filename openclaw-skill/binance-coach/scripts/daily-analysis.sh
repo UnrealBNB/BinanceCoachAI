@@ -1,7 +1,9 @@
 #!/bin/bash
 # BinanceCoach — twice-daily portfolio analysis with position scaling advice
 
-BC="bash /Users/vrijegebruiker/.openclaw/workspace/skills/binance-coach/scripts/bc.sh"
+# Auto-detect skill location
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+BC="bash ${SCRIPT_DIR}/bc.sh"
 ENV_FILE="$HOME/workspace/binance-coach/.env"
 PYTHON="/opt/homebrew/bin/python3"
 

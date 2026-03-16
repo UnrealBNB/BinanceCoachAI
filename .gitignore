@@ -8,3 +8,4 @@ data/*.db
 data/*.db.bak
 data/*.csv
 data/*.json
+.env

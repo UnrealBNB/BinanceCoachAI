@@ -1,11 +1,35 @@
+# Environment files - NEVER commit these
+.env
+.env.*
+*.env
+.env.local
+.env.development
+.env.production
+.env.test
+env/
+.envrc
+
 # Python
 __pycache__/
 *.pyc
 *.pyo
+*.pyd
+.Python
+venv/
+.venv/
 
 # Data files
 data/*.db
 data/*.db.bak
 data/*.csv
 data/*.json
-.env
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db

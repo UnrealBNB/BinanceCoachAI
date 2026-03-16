@@ -3,10 +3,16 @@ portfolio.py — Portfolio analysis & health scoring
 Fetches balances, calculates health score, detects concentration risk
 """
 
+from datetime import datetime
 from binance.spot import Spot
 from rich.console import Console
 from rich.table import Table
 from modules.i18n import t
+
+# Lazy import to avoid circular deps
+def _get_db():
+    from modules.coach_db import CoachDB
+    return CoachDB()
 
 console = Console()
 
@@ -180,6 +186,45 @@ class Portfolio:
             "stable_pct": round(stable_pct, 1),
             "n_assets": n_assets,
         }
+
+    def save_snapshot(self, balances: list, health: dict, fg: dict = None):
+        """Save today's portfolio snapshot to coach.db (once per day).
+        Pass fg=market.get_fear_greed() to also record real F&G in market_history.
+        """
+        try:
+            import logging as _log
+            db    = _get_db()
+            today = datetime.now().strftime("%Y-%m-%d")
+            db.save_portfolio_snapshot(
+                date=today,
+                balances=balances,
+                health_score=health.get("score", 0),
+                health_grade=health.get("grade", "?"),
+                total=health.get("total_usd", 0),
+            )
+            # Only write market_history if we have real F&G data
+            if fg and fg.get("value") is not None:
+                db.save_market_history(
+                    date=today,
+                    fg_score=int(fg["value"]),
+                    fg_label=fg.get("classification", ""),
+                    portfolio_total=health.get("total_usd", 0),
+                    health_score=health.get("score", 0),
+                    health_grade=health.get("grade", "?"),
+                )
+            else:
+                # Save portfolio data only, leave fg fields empty/null
+                db.save_market_history(
+                    date=today,
+                    fg_score=None,
+                    fg_label=None,
+                    portfolio_total=health.get("total_usd", 0),
+                    health_score=health.get("score", 0),
+                    health_grade=health.get("grade", "?"),
+                )
+        except Exception as e:
+            import logging as _log2
+            _log2.getLogger(__name__).debug(f"Snapshot save failed: {e}")
 
     def print_portfolio_table(self, balances: list[dict], health: dict):
         """Pretty-print portfolio in terminal."""

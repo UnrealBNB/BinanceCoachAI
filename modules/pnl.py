@@ -91,6 +91,85 @@ class PnLCalculator:
             return []
         return self.journal.get_performance()
 
+    def _pnl_from_coach_db(self) -> list:
+        """Build FIFO P&L from coach.db order_history (source of truth)."""
+        try:
+            from modules.coach_db import CoachDB
+            db = CoachDB()
+            if not db.has_orders():
+                return []
+            orders = db.get_orders(days=1095)
+            # Group by symbol
+            from collections import defaultdict, deque
+            symbol_orders = defaultdict(list)
+            for o in orders:
+                symbol_orders[o["symbol"]].append(o)
+
+            results = []
+            for symbol, sym_orders in symbol_orders.items():
+                asset     = symbol.replace("USDT","").replace("USDC","")
+                buy_queue = deque()
+                realised  = 0.0
+                total_bought = 0.0
+                total_sold   = 0.0
+                trade_count  = len(sym_orders)
+
+                for o in sorted(sym_orders, key=lambda x: x["timestamp"] or 0):
+                    price = float(o["price"] or 0)
+                    qty   = float(o["qty"] or 0)
+                    if o["side"] == "BUY":
+                        buy_queue.append([price, qty])
+                        total_bought += price * qty
+                    else:
+                        remaining = qty
+                        total_sold += price * qty
+                        while remaining > 0 and buy_queue:
+                            op, oq = buy_queue[0]
+                            matched = min(remaining, oq)
+                            realised += matched * (price - op)
+                            remaining -= matched
+                            if matched >= oq:
+                                buy_queue.popleft()
+                            else:
+                                buy_queue[0][1] -= matched
+
+                held_qty   = sum(q for _, q in buy_queue)
+                cost_basis = sum(p * q for p, q in buy_queue)
+                avg_entry  = cost_basis / held_qty if held_qty > 0 else 0.0
+
+                try:
+                    current_price = self.market.get_price(symbol)
+                except Exception:
+                    current_price = None
+
+                current_value  = held_qty * current_price if (current_price and held_qty > 0) else None
+                unrealised_pnl = (current_value - cost_basis) if current_value is not None else None
+                unrealised_pct = (
+                    unrealised_pnl / cost_basis * 100
+                    if (unrealised_pnl is not None and cost_basis > 0) else None
+                )
+
+                if held_qty > 0 or realised != 0:
+                    results.append({
+                        "symbol": symbol, "asset": asset,
+                        "total_trades": trade_count,
+                        "total_bought_usd": total_bought,
+                        "total_sold_usd": total_sold,
+                        "realised_pnl": realised,
+                        "held_qty": held_qty,
+                        "avg_entry": avg_entry,
+                        "cost_basis": cost_basis,
+                        "current_price": current_price,
+                        "current_value": current_value,
+                        "unrealised_pnl": unrealised_pnl,
+                        "unrealised_pct": unrealised_pct,
+                        "source": "coach_db",
+                    })
+            return sorted(results, key=lambda x: abs(x["realised_pnl"] + (x["unrealised_pnl"] or 0)), reverse=True)
+        except Exception as e:
+            logger.warning(f"coach_db P&L failed: {e}")
+            return []
+
     def calculate_coin_pnl(self, symbol: str, days: int = DEFAULT_DAYS) -> Optional[dict]:
         """FIFO P&L for a single coin (default: last 365 days)."""
         symbol = symbol.upper()
@@ -198,7 +277,19 @@ class PnLCalculator:
     # ── CLI output ────────────────────────────────────────────────────────────
 
     def print_pnl(self, symbol: str = None, days: int = DEFAULT_DAYS):
-        use_journal = False
+        # 1. Try coach.db order_history first (source of truth)
+        console.print(f"[dim]Checking local order history database...[/dim]")
+        db_results = self._pnl_from_coach_db()
+        if db_results:
+            if symbol:
+                sym = symbol.upper()
+                if not sym.endswith("USDT"):
+                    sym += "USDT"
+                db_results = [r for r in db_results if r["symbol"] == sym]
+            if db_results:
+                console.print("[dim cyan]📦 Using coach.db order history (source of truth)[/dim cyan]")
+                self._print_results(db_results, days=1095, source="coach.db")
+                return
 
         if symbol:
             console.print(f"[dim]Fetching {symbol.upper()} trade history (extended scan)...[/dim]")
@@ -289,6 +380,53 @@ class PnLCalculator:
             "[dim]⚠️  FIFO method. Commission costs excluded (use 'pnl-export' for "
             "Koinly/CoinTracking which calculates fees properly). If you hold coins "
             f"bought before the {days}-day window, cost basis may be understated.[/dim]"
+        )
+
+    def _print_results(self, results: list, days: int = 365, source: str = "Binance API"):
+        """Shared renderer for pnl results regardless of source."""
+        table = Table(title=f"💰 P&L Summary — {source}", border_style="green")
+        table.add_column("Coin",           width=7)
+        table.add_column("Trades",         justify="right", width=7)
+        table.add_column("Avg Entry",      justify="right", width=12)
+        table.add_column("Current",        justify="right", width=12)
+        table.add_column("Cost Basis",     justify="right", width=12)
+        table.add_column("Realised P&L",   justify="right", width=14)
+        table.add_column("Unrealised P&L", justify="right", width=15)
+        table.add_column("Total P&L",      justify="right", width=12)
+
+        total_realised   = 0.0
+        total_unrealised = 0.0
+
+        for r in results:
+            realised   = r.get("realised_pnl", 0) or 0
+            unrealised = r.get("unrealised_pnl") or 0.0
+            total      = realised + unrealised
+            total_realised   += realised
+            total_unrealised += unrealised
+            rc = "green" if realised   >= 0 else "red"
+            uc = "green" if unrealised >= 0 else "red"
+            tc = "green" if total      >= 0 else "red"
+            asset = r.get("asset") or r.get("coin") or "?"
+            table.add_row(
+                asset,
+                str(r.get("total_trades", r.get("buy_entries","?"))),
+                f"${r['avg_entry']:,.4f}"     if r.get("avg_entry")     else "—",
+                f"${r['current_price']:,.4f}" if r.get("current_price") else "?",
+                f"${r.get('cost_basis',0):,.2f}",
+                f"[{rc}]${realised:+,.2f}[/{rc}]",
+                f"[{uc}]${unrealised:+,.2f}[/{uc}]" if r.get("unrealised_pnl") is not None else "?",
+                f"[{tc}]${total:+,.2f}[/{tc}]",
+            )
+
+        console.print(table)
+        grand = total_realised + total_unrealised
+        rc = "green" if total_realised   >= 0 else "red"
+        uc = "green" if total_unrealised >= 0 else "red"
+        gc = "green" if grand            >= 0 else "red"
+        console.print(
+            f"\n[bold]Realised:[/bold] [{rc}]${total_realised:+,.2f}[/{rc}]  "
+            f"[bold]Unrealised:[/bold] [{uc}]${total_unrealised:+,.2f}[/{uc}]  "
+            f"[bold]Grand Total:[/bold] [{gc}]${grand:+,.2f}[/{gc}]"
         )
 
     def _print_journal_pnl(self, journal_results: list):

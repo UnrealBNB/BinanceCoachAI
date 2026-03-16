@@ -218,10 +218,35 @@ class DCAAdvisor:
         table.add_column(t("dca.col.coins"), style="white")
         table.add_column(t("dca.col.vs_sma200"), style="blue")
 
+        # Save analyses to coach.db
+        try:
+            from modules.coach_db import CoachDB
+            from datetime import datetime
+            db   = CoachDB()
+            today = datetime.now().strftime("%Y-%m-%d")
+        except Exception:
+            db = None
+            today = None
+
         recs = []
         for symbol in symbols:
             rec = self.get_recommendation(symbol)
             recs.append(rec)
+            if db and today:
+                try:
+                    db.save_dca_analysis(
+                        date=today,
+                        symbol=rec["symbol"],
+                        price=rec["price"],
+                        rsi=rec["rsi"],
+                        fg_score=rec["fg_value"],
+                        multiplier=rec["multiplier"],
+                        weekly_amount=rec["suggested_weekly_usd"],
+                        recommendation="; ".join(rec.get("rationale", [])),
+                    )
+                except Exception as e:
+                    import logging as _dca_log
+                    _dca_log.getLogger(__name__).debug("DCA DB save failed for %s: %s", rec["symbol"], e)
             multiplier_str = f"×{rec['multiplier']:.2f}"
             if rec['multiplier'] > 1.3:
                 multiplier_str = f"[green]{multiplier_str}[/green]"

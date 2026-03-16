@@ -37,30 +37,26 @@ class BinanceNews:
 
     def _init_db(self):
         DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-        conn = sqlite3.connect(DB_PATH)
-        conn.execute(
-            "CREATE TABLE IF NOT EXISTS seen "
-            "(article_id INTEGER PRIMARY KEY, seen_at TEXT)"
-        )
-        conn.commit()
-        conn.close()
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS seen "
+                "(article_id INTEGER PRIMARY KEY, seen_at TEXT)"
+            )
+            conn.commit()
 
     def _is_seen(self, article_id: int) -> bool:
-        conn = sqlite3.connect(DB_PATH)
-        row = conn.execute(
-            "SELECT 1 FROM seen WHERE article_id=?", (article_id,)
-        ).fetchone()
-        conn.close()
-        return row is not None
+        with sqlite3.connect(DB_PATH) as conn:
+            return conn.execute(
+                "SELECT 1 FROM seen WHERE article_id=?", (article_id,)
+            ).fetchone() is not None
 
     def _mark_seen(self, article_id: int):
-        conn = sqlite3.connect(DB_PATH)
-        conn.execute(
-            "INSERT OR IGNORE INTO seen VALUES (?,?)",
-            (article_id, datetime.now().isoformat())
-        )
-        conn.commit()
-        conn.close()
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.execute(
+                "INSERT OR IGNORE INTO seen VALUES (?,?)",
+                (article_id, datetime.now().isoformat())
+            )
+            conn.commit()
 
     def get_articles(self, catalog_id: int, limit: int = 5) -> list:
         """Fetch articles from the Binance CMS API for a given catalog."""
@@ -216,7 +212,10 @@ class BinanceNews:
 # ── Watcher daemon ───────────────────────────────────────────────────────────
 
 def _send_telegram(token: str, chat_id: str, text: str):
-    """Send a Telegram message via Bot API."""
+    """Send a Telegram message via Bot API.
+    Token is passed as a path segment (Telegram's standard), but we suppress
+    it from any error messages to avoid accidental log exposure.
+    """
     try:
         requests.post(
             f"https://api.telegram.org/bot{token}/sendMessage",
@@ -224,7 +223,9 @@ def _send_telegram(token: str, chat_id: str, text: str):
             timeout=10,
         )
     except Exception as e:
-        logger.error(f"Telegram send failed: {e}")
+        # Redact token from error string before logging
+        safe_err = str(e).replace(token, "<redacted>")
+        logger.error(f"Telegram send failed: {safe_err}")
 
 
 def run_watcher(interval: int = 60, portfolio=None):
